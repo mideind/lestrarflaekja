@@ -1,4 +1,4 @@
-# pylint: disable=unused-import,unused-argument,W0611,logging-fstring-interpolation,trailing-whitespace
+# pylint: disable=unused-import,unused-argument,W0611,W0612,logging-fstring-interpolation,trailing-whitespace
 # type: ignore[reportUnusedImport]
 # ruff: noqa: F401
 
@@ -12,13 +12,16 @@
     - en geta breytt og fiktað í lossinum
 
 4. athuga með Garðar hvort hann hafi fínþjálfunar hástikana sem við notuðum fyrir aisweden
+
+5. Athuga LoRA og þannig
 """
 
 import functools
 import logging
 import sys
-import os
+from typing import Mapping
 
+import torch
 import datasets as hf_datasets
 from omegaconf import OmegaConf
 from transformers import (
@@ -28,6 +31,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from transformers.trainer import _is_peft_model
 
 from utils import (
     TrainConfig,
@@ -42,33 +46,113 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Set the WANDB_PROJECT environment variable
-os.environ["WANDB_PROJECT"] = "lestrarflaekja"
-os.environ["WANDB_ENTITY"] = "mideind"
 class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
     """Collator for the reconstruction task."""
 
     def torch_call(self, examples: list[dict]) -> dict:
         # the super method does not handle our dict keys
-        # TODO: WIP
-        breakpoint()
+
+        # Handle dict or lists with proper padding and conversion to tensor.
+
+        if self.seed and self.generator is None:
+            # If we have a seed, we need to create a generator object. Subsequent calls to this function will use the same generator.
+            # If no seed supplied, we will use the global RNG
+            self.create_rng()
+
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            [torch.tensor(example["input_ids"]) for example in examples],
+            batch_first=True,
+            padding_value=self.tokenizer.pad_token_id,
+        )
+        if "weights" in examples[0]:
+            weights = torch.nn.utils.rnn.pad_sequence(
+                [torch.tensor(example["weights"]) for example in examples],
+                batch_first=True,
+                padding_value=0,
+            ).float()
+
+            labels = input_ids.clone()
+            labels[labels == self.tokenizer.pad_token_id] = -100
+
+            return {"input_ids": input_ids, "labels": labels, "weights": weights}
+        else:
+            # TODO: Ask Haukur Barri if this is the correct way to handle labels
+            # Shift input_ids to create labels for next-token prediction
+            labels = input_ids[:, 1:].clone()  # Remove first token
+            input_ids = input_ids[:, :-1]  # Remove last token
+
+            # Pad labels to match input_ids length if needed, or handle length mismatch
+            # Option 1: Pad labels with -100
+            labels = torch.nn.functional.pad(labels, (0, 1), value=-100)
+
+            return {
+                "input_ids": input_ids,
+                "labels": labels,
+            }
 
 
-class CustomTrainer(Trainer):
-    def __init__(self, *args, loss_fn=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.loss_fn = loss_fn
+class TruncatedLossTrainer(Trainer):
+    """Trainer that computes the loss only for the task output tokens."""
 
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(
+        self, model, inputs, return_outputs=False, num_items_in_batch=None
+    ):
+        input_ids = inputs["input_ids"]
+        weights = inputs.get("weights", None)
         labels = inputs["labels"]
-        outputs = model(**inputs)
+
+        if weights is None:
+            weights = torch.ones_like(input_ids)
+
+        outputs = model(input_ids=input_ids, labels=labels)
         logits = outputs["logits"]
 
-        if self.loss_fn:
-            loss = self.loss_fn(logits, labels)
-        else:
-            # Fallback to default if no custom loss is provided
-            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+        nonzero_weight_mask = weights.ge(0)
+        is_input_and_not_padding = labels.neq(-100)
+        loss_contribution_mask = nonzero_weight_mask.logical_and(
+            is_input_and_not_padding
+        )
+
+        flat_logits = logits[loss_contribution_mask]
+        flat_labels = labels[loss_contribution_mask]
+
+        loss = torch.nn.functional.cross_entropy(
+            flat_logits, flat_labels, reduction="mean"
+        )
+
+        ##########
+        ### from super class
+
+        # outputs = model(**inputs)
+        # # Save past state if it exists
+        # # TODO: this needs to be fixed and made cleaner later.
+        # if self.args.past_index >= 0:
+        #     self._past = outputs[self.args.past_index]
+
+        # if labels is not None:
+        #     unwrapped_model = self.accelerator.unwrap_model(model)
+        #     if _is_peft_model(unwrapped_model):
+        #         model_name = unwrapped_model.base_model.model._get_name()
+        #     else:
+        #         model_name = unwrapped_model._get_name()
+        #     # User-defined compute_loss function
+        #     if self.compute_loss_func is not None:
+        #         loss = self.compute_loss_func(
+        #             outputs, labels, num_items_in_batch=num_items_in_batch
+        #         )
+        #     elif model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+        #         loss = self.label_smoother(outputs, labels, shift_labels=True)
+        #     else:
+        #         loss = self.label_smoother(outputs, labels)
+
+        # if (
+        #     self.args.average_tokens_across_devices
+        #     and (self.model_accepts_loss_kwargs or self.compute_loss_func)
+        #     and num_items_in_batch is not None
+        # ):
+        #     loss *= self.accelerator.num_processes
+
+        ##########
 
         return (loss, outputs) if return_outputs else loss
 
@@ -81,12 +165,11 @@ def fooberino(cfg: TrainConfig) -> None:
     raw_dataset = hf_datasets.load_dataset(cfg.dataset_name)
 
     # sample 100 datapoints from the dataset
-    nshards = 1000
     small_text_ds = hf_datasets.DatasetDict(
         {
-            "train": raw_dataset["train"].shard(nshards, 0),
-            "validation": raw_dataset["validation"].shard(nshards, 0),
-            "test": raw_dataset["test"].shard(nshards, 0),
+            "train": raw_dataset["train"].shuffle(seed=42).select(range(1000)),
+            "validation": raw_dataset["validation"].shuffle(seed=42).select(range(100)),
+            "test": raw_dataset["test"].shuffle(seed=42).select(range(100)),
         }
     )
 
@@ -94,6 +177,7 @@ def fooberino(cfg: TrainConfig) -> None:
     logger.info(f"Loading model: {cfg.model_name}")
     model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    model.accepts_loss_kwargs = False
 
     tokenize = functools.partial(tokenizer_fn, cfg=cfg, tokenizer=tokenizer)
     # tokenize the dataset
@@ -103,18 +187,18 @@ def fooberino(cfg: TrainConfig) -> None:
         remove_columns=small_text_ds["train"].column_names,
     )
 
-    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    data_collator = ReconstructionTaskCollator(tokenizer=tokenizer, mlm=False)
 
     # Initialize Trainer with custom loss function if needed
 
     args = TrainingArguments(
         output_dir="./results",
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
+        per_device_train_batch_size=32,
+        per_device_eval_batch_size=32,
         eval_strategy="steps",
-        eval_steps=10,
-        logging_steps=5,
-        gradient_accumulation_steps=1,
+        eval_steps=5_000,
+        logging_steps=5_000,
+        gradient_accumulation_steps=8,
         num_train_epochs=1,
         weight_decay=0.1,
         warmup_steps=1_000,
@@ -123,11 +207,8 @@ def fooberino(cfg: TrainConfig) -> None:
         save_steps=5_000,
         fp16=False,  # not allowed on mac
         push_to_hub=False,
-        # report_to="none",  # disable reporting to wandb or other services
-        report_to="wandb",  # enable reporting to wandb
     )
-    # trainer = CustomTrainer(
-    trainer = Trainer(
+    trainer = TruncatedLossTrainer(
         model=model,
         tokenizer=tokenizer,
         args=args,
