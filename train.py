@@ -105,7 +105,8 @@ class TruncatedLossTrainer(Trainer):
         logits = outputs["logits"]
 
         nonzero_weight_mask = weights.ge(0)
-        is_input_and_not_padding = labels.neq(-100)
+        # is_input_and_not_padding = labels.neq(-100) # neq() is deprecated
+        is_input_and_not_padding = labels != -100
         loss_contribution_mask = nonzero_weight_mask.logical_and(
             is_input_and_not_padding
         )
