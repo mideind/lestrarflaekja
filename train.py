@@ -1,4 +1,4 @@
-# pylint: disable=unused-import,unused-argument,W0611,logging-fstring-interpolation,trailing-whitespace
+# pylint: disable=unused-import,unused-argument,W0611,W0612,logging-fstring-interpolation,trailing-whitespace
 # type: ignore[reportUnusedImport]
 # ruff: noqa: F401
 
@@ -12,12 +12,16 @@
     - en geta breytt og fiktað í lossinum
 
 4. athuga með Garðar hvort hann hafi fínþjálfunar hástikana sem við notuðum fyrir aisweden
+
+5. Athuga LoRA og þannig
 """
 
 import functools
 import logging
 import sys
+from typing import Mapping
 
+import torch
 import datasets as hf_datasets
 from omegaconf import OmegaConf
 from transformers import (
@@ -27,6 +31,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from transformers.trainer import _is_peft_model
 
 from utils import (
     TrainConfig,
@@ -46,25 +51,90 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
 
     def torch_call(self, examples: list[dict]) -> dict:
         # the super method does not handle our dict keys
-        # TODO: WIP
-        breakpoint()
+
+        # Handle dict or lists with proper padding and conversion to tensor.
+
+        if self.seed and self.generator is None:
+            # If we have a seed, we need to create a generator object. Subsequent calls to this function will use the same generator.
+            # If no seed supplied, we will use the global RNG
+            self.create_rng()
+
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            [torch.tensor(example["input_ids"]) for example in examples],
+            batch_first=True,
+            padding_value=self.tokenizer.pad_token_id,
+        )
+        if "weights" in examples[0]:
+            weights = torch.nn.utils.rnn.pad_sequence(
+                [torch.tensor(example["weights"]) for example in examples],
+                batch_first=True,
+                padding_value=0,
+            ).float()
+
+            labels = input_ids.clone()
+            labels[labels == self.tokenizer.pad_token_id] = -100
+
+            return {"input_ids": input_ids, "labels": labels, "weights": weights}
+        else:
+            return {"input_ids": input_ids}
 
 
-class CustomTrainer(Trainer):
-    def __init__(self, *args, loss_fn=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.loss_fn = loss_fn
+class TruncatedLossTrainer(Trainer):
+    """Trainer that computes the loss only for the task output tokens."""
 
     def compute_loss(self, model, inputs, return_outputs=False):
+        input_ids = inputs["input_ids"]
+        weights = inputs.get("weights", None)
         labels = inputs["labels"]
-        outputs = model(**inputs)
+
+        if weights is None:
+            weights = torch.ones_like(input_ids)
+
+        outputs = model(input_ids=input_ids, labels=labels)
         logits = outputs["logits"]
 
-        if self.loss_fn:
-            loss = self.loss_fn(logits, labels)
-        else:
-            # Fallback to default if no custom loss is provided
-            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+        nonzero_weight_mask = weights.ge(0)
+        is_input_and_not_padding = labels.neq(-100)
+        loss_contribution_mask = nonzero_weight_mask.logical_and(is_input_and_not_padding)
+
+        flat_logits = logits[loss_contribution_mask]
+        flat_labels = labels[loss_contribution_mask]
+
+        loss = torch.nn.functional.cross_entropy(flat_logits, flat_labels, reduction="mean")
+
+        ##########
+        ### from super class
+
+        # outputs = model(**inputs)
+        # # Save past state if it exists
+        # # TODO: this needs to be fixed and made cleaner later.
+        # if self.args.past_index >= 0:
+        #     self._past = outputs[self.args.past_index]
+
+        # if labels is not None:
+        #     unwrapped_model = self.accelerator.unwrap_model(model)
+        #     if _is_peft_model(unwrapped_model):
+        #         model_name = unwrapped_model.base_model.model._get_name()
+        #     else:
+        #         model_name = unwrapped_model._get_name()
+        #     # User-defined compute_loss function
+        #     if self.compute_loss_func is not None:
+        #         loss = self.compute_loss_func(
+        #             outputs, labels, num_items_in_batch=num_items_in_batch
+        #         )
+        #     elif model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+        #         loss = self.label_smoother(outputs, labels, shift_labels=True)
+        #     else:
+        #         loss = self.label_smoother(outputs, labels)
+
+        # if (
+        #     self.args.average_tokens_across_devices
+        #     and (self.model_accepts_loss_kwargs or self.compute_loss_func)
+        #     and num_items_in_batch is not None
+        # ):
+        #     loss *= self.accelerator.num_processes
+
+        ##########
 
         return (loss, outputs) if return_outputs else loss
 
@@ -87,6 +157,7 @@ def fooberino(cfg: TrainConfig) -> None:
     logger.info(f"Loading model: {cfg.model_name}")
     model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    model.accepts_loss_kwargs = False
 
     tokenize = functools.partial(tokenizer_fn, cfg=cfg, tokenizer=tokenizer)
     # tokenize the dataset
@@ -96,7 +167,7 @@ def fooberino(cfg: TrainConfig) -> None:
         remove_columns=small_text_ds["train"].column_names,
     )
 
-    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    data_collator = ReconstructionTaskCollator(tokenizer=tokenizer, mlm=False)
 
     # Initialize Trainer with custom loss function if needed
 
@@ -117,7 +188,7 @@ def fooberino(cfg: TrainConfig) -> None:
         fp16=False,  # not allowed on mac
         push_to_hub=False,
     )
-    trainer = CustomTrainer(
+    trainer = TruncatedLossTrainer(
         model=model,
         tokenizer=tokenizer,
         args=args,
