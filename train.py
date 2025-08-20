@@ -77,13 +77,10 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
             return {"input_ids": input_ids, "labels": labels, "weights": weights}
         else:
             # TODO: Ask Haukur Barri if this is the correct way to handle labels
-            # Shift input_ids to create labels for next-token prediction
-            labels = input_ids[:, 1:].clone()  # Remove first token
-            input_ids = input_ids[:, :-1]  # Remove last token
-
-            # Pad labels to match input_ids length if needed, or handle length mismatch
-            # Option 1: Pad labels with -100
-            labels = torch.nn.functional.pad(labels, (0, 1), value=-100)
+            labels = input_ids.clone()
+            # Shift labels left by 1 position
+            labels[:, :-1] = input_ids[:, 1:]
+            labels[:, -1] = -100  # Ignore loss for last position
 
             return {
                 "input_ids": input_ids,
