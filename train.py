@@ -42,31 +42,25 @@ from transformers import (
     DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
+    BitsAndBytesConfig,
 )
-from transformers.trainer import _is_peft_model
 from peft import PeftModel, LoraConfig
-from peft import LoraConfig, get_peft_model
+from peft import get_peft_model
 
 from utils import (
     TrainConfig,
     tokenizer_fn,
 )
 
-import torch.distributed as dist
+from accelerate import Accelerator
 
-def is_main_process() -> bool:
-    return not dist.is_initialized() or dist.get_rank() == 0
+accelerator = Accelerator()
 
-if is_main_process():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s] %(message)s",
-        datefmt="%H:%M:%S",
-    )
-else:
-    # Disable logging for non-main processes.
-    logging.basicConfig(level=logging.ERROR)
-
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
 logger = logging.getLogger(__name__)
 
 
@@ -191,9 +185,10 @@ def print_trainable_parameters(model: PeftModel) -> None:
     # print(
     #     f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
     # )
-    logger.info(
-        f"trainable params: {trainable_params / 1e6:.2f}M || all params: {all_param / 1e6:.2f}M || trainable%: {100 * trainable_params / all_param:.2f}%"
-    )
+    if accelerator.is_main_process:
+        logger.info(
+            f"trainable params: {trainable_params / 1e6:.2f}M || all params: {all_param / 1e6:.2f}M || trainable%: {100 * trainable_params / all_param:.2f}%"
+        )
 
 
 
@@ -201,7 +196,8 @@ def fooberino(cfg: TrainConfig) -> None:
     """fooberino function"""
 
     # load dataset from huggingface
-    logger.info(f"Loading dataset: {cfg.dataset_name}")
+    if accelerator.is_main_process:
+        logger.info(f"Loading dataset: {cfg.dataset_name}")
     raw_dataset = hf_datasets.load_dataset(cfg.dataset_name)
 
     # sample 100 datapoints from the dataset
@@ -213,11 +209,15 @@ def fooberino(cfg: TrainConfig) -> None:
         }
     )
 
+    quantized_config = BitsAndBytesConfig(load_in_8bit=True)
+    base_model = AutoModelForCausalLM.from_pretrained(cfg.model_name, quantization_config=quantized_config, device_map="auto")
+
     # load model from huggingface
     if cfg.use_lora:
         # Load the base model
-        logger.info("Loading base model for LoRA training...")
-        base_model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
+        if accelerator.is_main_process:
+            logger.info("Loading base model for LoRA training...")
+
         # Load LoRA configuration
         lora_config = LoraConfig(
             lora_alpha=16,
@@ -228,11 +228,12 @@ def fooberino(cfg: TrainConfig) -> None:
             base_model,
             lora_config,
         )
-
-        print_trainable_parameters(model)
     else:
-        model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
-        print_trainable_parameters(model)
+        if accelerator.is_main_process:
+            logger.info("Loading model without LoRA...")
+        model = base_model
+
+    print_trainable_parameters(model)
 
     model.accepts_loss_kwargs = False
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
@@ -276,11 +277,13 @@ def fooberino(cfg: TrainConfig) -> None:
     )
 
     # Train the model
-    logger.info("Starting training...")
+    if accelerator.is_main_process:
+        logger.info("Starting training...")
     trainer.train()
 
     # Save the model
-    logger.info("Saving the model...")
+    if accelerator.is_main_process:
+        logger.info("Saving the model...")
     trainer.save_model("./trained_model")
 
 
