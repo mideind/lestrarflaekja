@@ -211,7 +211,6 @@ def fooberino(cfg: TrainConfig) -> None:
     # Load the base model with specific device mapping
     base_model = AutoModelForCausalLM.from_pretrained(
         cfg.model_name,
-        device_map="auto",
         torch_dtype=torch.bfloat16
     )
 
