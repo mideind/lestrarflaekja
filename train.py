@@ -14,6 +14,18 @@
 4. athuga með Garðar hvort hann hafi fínþjálfunar hástikana sem við notuðum fyrir aisweden
 
 5. Athuga LoRA og þannig
+
+
+
+Fyrir 1 gpu þjálfun:
+```
+torchrun --standalone --nnodes=1 --nproc-per-node=gpu train.py
+```
+
+fyrir 8 gpu þjálfun:
+```
+torchrun --standalone --nnodes=1 --nproc-per-node=8 train.py
+```
 """
 
 import functools
@@ -202,9 +214,6 @@ def fooberino(cfg: TrainConfig) -> None:
             lora_dropout=0.05,
             r=32,
         )
-
-        # print number of parameters in lora config
-        logger.info(f"LoRA config: {lora_config}")
         model = get_peft_model(
             base_model,
             lora_config,
@@ -263,9 +272,6 @@ def fooberino(cfg: TrainConfig) -> None:
     # Save the model
     logger.info("Saving the model...")
     trainer.save_model("./trained_model")
-
-    breakpoint()
-    pass
 
 
 def main() -> None:
