@@ -245,9 +245,9 @@ def fooberino(cfg: TrainConfig) -> None:
         model = get_peft_model(base_model, lora_config)
 
         # Ensure LoRA parameters are in bf16
-        for name, param in model.named_parameters():
-            if param.requires_grad:  # LoRA parameters
-                param.data = param.data.to(torch.bfloat16)
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:  # LoRA parameters
+        #         param.data = param.data.to(torch.bfloat16)
 
     else:
         if accelerator.is_main_process:
