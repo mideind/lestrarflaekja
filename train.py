@@ -32,6 +32,8 @@ from transformers import (
     TrainingArguments,
 )
 from transformers.trainer import _is_peft_model
+from peft import PeftModel, LoraConfig
+from peft import LoraConfig, get_peft_model
 
 from utils import (
     TrainConfig,
@@ -154,6 +156,24 @@ class TruncatedLossTrainer(Trainer):
 
         return (loss, outputs) if return_outputs else loss
 
+def print_trainable_parameters(model: PeftModel) -> None:
+    """
+    Prints the number of trainable parameters in the model.
+    """
+    trainable_params = 0
+    all_param = 0
+    for _, param in model.named_parameters():
+        all_param += param.numel()
+        if param.requires_grad:
+            trainable_params += param.numel()
+    # print(
+    #     f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
+    # )
+    logger.info(
+        f"trainable params: {trainable_params / 1e6:.2f}M || all params: {all_param / 1e6:.2f}M || trainable%: {100 * trainable_params / all_param:.2f}%"
+    )
+
+
 
 def fooberino(cfg: TrainConfig) -> None:
     """fooberino function"""
@@ -172,10 +192,31 @@ def fooberino(cfg: TrainConfig) -> None:
     )
 
     # load model from huggingface
-    logger.info(f"Loading model: {cfg.model_name}")
-    model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    if cfg.use_lora:
+        # Load the base model
+        logger.info("Loading base model for LoRA training...")
+        base_model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
+        # Load LoRA configuration
+        lora_config = LoraConfig(
+            lora_alpha=16,
+            lora_dropout=0.05,
+            r=32,
+        )
+
+        # print number of parameters in lora config
+        logger.info(f"LoRA config: {lora_config}")
+        model = get_peft_model(
+            base_model,
+            lora_config,
+        )
+
+        print_trainable_parameters(model)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
+        print_trainable_parameters(model)
+
     model.accepts_loss_kwargs = False
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
 
     tokenize = functools.partial(tokenizer_fn, cfg=cfg, tokenizer=tokenizer)
     # tokenize the dataset
@@ -191,12 +232,12 @@ def fooberino(cfg: TrainConfig) -> None:
 
     args = TrainingArguments(
         output_dir="./results",
-        per_device_train_batch_size=32,
-        per_device_eval_batch_size=32,
+        per_device_train_batch_size=2,
+        per_device_eval_batch_size=2,
         eval_strategy="steps",
         eval_steps=5_000,
         logging_steps=5_000,
-        gradient_accumulation_steps=8,
+        gradient_accumulation_steps=1,
         num_train_epochs=1,
         weight_decay=0.1,
         warmup_steps=1_000,

@@ -8,3 +8,4 @@ huggingface-hub>=0.15.0
 accelerate>=0.20.0
 sentencepiece>=0.1.99
 matplotlib>=3.7.0
+peft>=0.17.1

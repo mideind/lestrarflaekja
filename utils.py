@@ -51,6 +51,7 @@ class TrainConfig:
     model_name: str = "AI-Sweden-Models/gpt-sw3-126m"
     context_len: int = 512
     delimiter: str = "<|endoftext|>"  # or any other delimiter you want to use
+    use_lora: bool = True # Enable LoRA training
 
 
 def bin_noise(cfg: DataConfig, noise_rate: float) -> str:
