@@ -44,8 +44,7 @@ from transformers import (
     TrainingArguments,
     BitsAndBytesConfig,
 )
-from peft import PeftModel, LoraConfig
-from peft import get_peft_model
+from peft import PeftModel, LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 from utils import (
     TrainConfig,
@@ -209,30 +208,50 @@ def fooberino(cfg: TrainConfig) -> None:
         }
     )
 
-    quantized_config = BitsAndBytesConfig(load_in_8bit=True)
-    base_model = AutoModelForCausalLM.from_pretrained(cfg.model_name, quantization_config=quantized_config, device_map="auto")
+    # Configure 8-bit quantization
+    quantized_config = BitsAndBytesConfig(
+        load_in_8bit=True,
+        bnb_8bit_compute_dtype=torch.bfloat16,  # Use bf16 for computation
+        bnb_8bit_use_double_quant=True,         # Enable nested quantization for better performance
+        bnb_8bit_quant_type="nf8"               # Use normalized float 8-bit
+    )
 
-    # load model from huggingface
+    # Load the base model with quantization
+    base_model = AutoModelForCausalLM.from_pretrained(
+        cfg.model_name,
+        quantization_config=quantized_config,
+        device_map="auto",
+        torch_dtype=torch.bfloat16  # Set the model dtype to bf16
+    )
+
     if cfg.use_lora:
-        # Load the base model
         if accelerator.is_main_process:
             logger.info("Loading base model for LoRA training...")
 
-        # Load LoRA configuration
+        # Prepare model for k-bit training (essential for quantized training)
+        base_model = prepare_model_for_kbit_training(base_model)
+
+        # Configure LoRA
         lora_config = LoraConfig(
             lora_alpha=16,
             lora_dropout=0.05,
             r=32,
+            bias="none",
+            task_type="CAUSAL_LM",
         )
-        model = get_peft_model(
-            base_model,
-            lora_config,
-        )
+
+        # Apply LoRA to the model
+        model = get_peft_model(base_model, lora_config)
+
+        # Ensure LoRA parameters are in bf16
+        for name, param in model.named_parameters():
+            if param.requires_grad:  # LoRA parameters
+                param.data = param.data.to(torch.bfloat16)
+
     else:
         if accelerator.is_main_process:
             logger.info("Loading model without LoRA...")
         model = base_model
-
     print_trainable_parameters(model)
 
     model.accepts_loss_kwargs = False
@@ -264,8 +283,9 @@ def fooberino(cfg: TrainConfig) -> None:
         lr_scheduler_type="cosine",
         learning_rate=5e-4,
         save_steps=5_000,
-        fp16=False,  # not allowed on mac
         push_to_hub=False,
+        bf16=True,  # Enable bf16 training
+        dataloader_pin_memory=False,  # Recommended for quantized training
     )
     trainer = TruncatedLossTrainer(
         model=model,
