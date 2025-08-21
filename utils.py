@@ -1,10 +1,14 @@
 from dataclasses import dataclass
 from enum import StrEnum
+import re
 
+from omegaconf import MISSING
 import numpy as np
 from transformers import (
     AutoTokenizer,
 )
+
+PATTERN = re.compile(r"[^\w ]", flags=re.UNICODE)
 
 
 class ProcessType(StrEnum):
@@ -18,23 +22,26 @@ class ProcessType(StrEnum):
 class DataConfig:
     """Configuration for the project."""
 
+    dataset_name: str = MISSING
     # dataset_name: str = "mideind/mim"
-    dataset_name: str = "mideind/mim-gold-21.05"
+    # dataset_name: str = "mideind/mim-gold-21.05"
     # dataset_name: str = "mideind/is_prototyping_corpus"
     tokenizer_name: str = "AI-Sweden-Models/gpt-sw3-126m"
     transform_type: ProcessType = ProcessType.WORD_NOISE
-    noise_prob: float = 0.02
-    permutation_distance: int = 2
+    permutation_distance: int = 5
     mask_token: str = "<mask>"
-    soup_keep_rate: float = 0.5
+    soup_keep_rate: float = 0.66
+    soup_ratio_low_bin: float = 0.25
+    soup_ratio_med_bin: float = 0.5
+    soup_ratio_high_bin: float = 0.75
     max_soup_words: int = 100
     max_prefix_words: int = 10
-    bin_noise_low: float = 0.01
-    bin_noise_medium: float = 0.025
-    bin_noise_high: float = 0.05
+    scramble_low_bin: float = 0.01
+    scramble_med_bin: float = 0.025
+    scramble_high_bin: float = 0.05
     context_len: int = 512
-    min_words_in_primary: int = 30
-    max_words_in_primary: int = 128
+    min_words_main: int = 30
+    max_words_main: int = 128
     save_tokenized: bool = True
     delimiter: str = "<|endoftext|>"  # or any other delimiter you want to use
     use_hint: bool = True
@@ -54,17 +61,16 @@ class TrainConfig:
     delimiter: str = "<|endoftext|>"  # or any other delimiter you want to use
 
 
-def bin_noise(cfg: DataConfig, noise_rate: float) -> str:
-    """Bin noise rate."""
-    if noise_rate < cfg.bin_noise_low:
-        return "low"
-    elif noise_rate < cfg.bin_noise_medium:
-        return "medium"
-    else:
-        return "high"
+def nearest_bin_noise(
+    cfg: DataConfig, noise_rate: float, low: float, med: float, high: float
+) -> str:
+    """Nearest bin label for noise rate."""
+    arg = np.argmin(np.abs(noise_rate - np.array([low, med, high])))
+    labels = ("low", "medium", "high")
+    return labels[arg]
 
 
-def chunk_text_by_word_count(text: str, max_words: int, min_words: int) -> list[str]:
+def chunk_text_by_word_count(text: str, min_words: int, max_words: int) -> list[str]:
     """Chunk text by word count."""
     words = text.split()
     if len(words) < min_words:
@@ -90,35 +96,41 @@ def transform_example_word_noise(
     - insert
     - shuffle
 
-    Assumin default hyperparameters:
+    The aux text is expected to be a cleaned version of the auxiliary text (no punctuation).
+
+    Assuming default hyperparameters:
     - The number of BPE tokens in the input_ids is approximately 2.2x the number of BPE tokens in the original text.
     - Alternatively, the number of BPE tokens is between 3x and 4x the number of words in the original text.
     """
     # split into wordlike tokens
     words = text.split()
-    if len(words) < cfg.min_words_in_primary:
+    if len(words) < cfg.min_words_main:
         return None
 
-    # 1. sample which tokens to delete
-    should_delete = np.random.uniform(0, 1, size=len(words)) < cfg.noise_prob
+    scramble_rate = np.random.uniform(cfg.scramble_low_bin, cfg.scramble_high_bin)
+    # 1. sample which tokens will be deleted
+    should_delete = np.random.uniform(0, 1, size=len(words)) < scramble_rate
     should_keep = np.logical_not(should_delete)
     words = [word for word, keep in zip(words, should_keep) if keep]
 
-    # 2. sample which tokens to mask
-    should_mask = np.random.uniform(0, 1, size=len(words)) < cfg.noise_prob
+    # 2. sample will be masked
+    should_mask = np.random.uniform(0, 1, size=len(words)) < scramble_rate
     words = [cfg.mask_token if mask else word for word, mask in zip(words, should_mask)]
 
-    # 3. sample when to insert token (using auxiliary example as source of tokens)
-    should_insert = np.random.uniform(0, 1, size=len(words)) < cfg.noise_prob
+    # 3. sample the location of the inserted tokens
+    should_insert = np.random.uniform(0, 1, size=len(words)) < scramble_rate
     aux_words = aux.split()
-    # map to random word (insert of shuffling)
-    perm = np.random.permutation(len(aux_words))
-    words = [
-        aux_words[perm[i]] if insert else word
-        for i, (word, insert) in enumerate(zip(words, should_insert))
-    ]
+    # determine which words will be inserted
+    perm = np.random.permutation(len(words)) % len(aux_words)
+    # splice the words with randomly selected aux words
+    spliced = []
+    for i, (word, insert) in enumerate(zip(words, should_insert)):
+        if insert:
+            spliced.append(aux_words[perm[i]])
+        spliced.append(word)
+    words = spliced
 
-    # 4. sample which tokens to shuffle
+    # 4. sample new location after position of noise
     position_before_noise = np.arange(len(words), dtype=np.float32)
     position_noise = np.random.uniform(0, cfg.permutation_distance, size=len(words))
     position_after_noise = position_before_noise + position_noise
@@ -126,10 +138,11 @@ def transform_example_word_noise(
     words = [words[i] for i in np.argsort(position_after_noise)]
     scramble = " ".join(words)
 
-    # NOTE: we could make the within-k-shuffle respect sentence boundaries
-
     # hint for the task
-    hint_str = f"[noise {bin_noise(cfg, cfg.noise_prob)}]"
+    noise_bin = nearest_bin_noise(
+        cfg, scramble_rate, cfg.scramble_low_bin, cfg.scramble_med_bin, cfg.scramble_high_bin
+    )
+    hint_str = f"[noise {noise_bin}]"
 
     if not cfg.save_tokenized:
         return {
@@ -184,41 +197,47 @@ def transform_example_word_noise(
 
 
 def transform_example_word_soup(
-    text: str, *, cfg: DataConfig, tokenizer: AutoTokenizer, aux_texts: list[str]
+    text: str, *, cfg: DataConfig, tokenizer: AutoTokenizer, clean_aux: str
 ) -> dict:
     """Transform example with word soup."""
-    # primary example, extract distinct words
-    main_words = text.split()
-    distinct_words = set(main_words)
-    # drop some of the distinct words
-    should_keep = np.random.uniform(0, 1, size=len(distinct_words)) < cfg.soup_keep_rate
-    distinct_words = [word for (word, keep) in zip(distinct_words, should_keep) if keep]
+    # extract just the words (without punctuation) from the text
+    cleaned_text = PATTERN.sub("", text)
+    main_words = set(cleaned_text.split())
+    # make sure some words are dropped
+    should_keep = np.random.uniform(0, 1, size=len(main_words)) < cfg.soup_keep_rate
+    kept_words = [word for (word, keep) in zip(main_words, should_keep) if keep]
 
-    # auxiliary examples, same process as for primary example
-    aux_stuff = []
-    for aux_text in aux_texts:
-        aux_words = set(aux_text.split())
-        should_keep = np.random.uniform(0, 1, size=len(aux_words)) < cfg.soup_keep_rate
-        aux_words = [word for (word, keep) in zip(aux_words, should_keep) if keep]
-        aux_stuff.append(aux_words)
+    # distractor words from auxiliary texts
+    aux_words = set(clean_aux.split())
+    aux_words = [word for word in aux_words if word in main_words]
+    should_keep = np.random.uniform(0, 1, size=len(aux_words)) < cfg.soup_keep_rate
+    kept_aux = set([word for (word, keep) in zip(aux_words, should_keep) if keep])
 
-    soup_words = set()
-    # combine distinct words from primary and auxiliary examples into list
-    for aux_words in aux_stuff:
-        soup_words.update(aux_words)
-    soup_words.update(distinct_words)
-    word_soup = list(soup_words)
-    # shuffle list, and then truncate
-    np.random.shuffle(word_soup)
-    word_soup = word_soup[: cfg.max_soup_words]
-    word_soup = " ".join(word_soup)
+    # convert to list and shuffle
+    kept_aux = list(kept_aux)
+    np.random.shuffle(kept_aux)
 
-    # split primary example into prefix and rest (the reconstruction target)
-    prefix = " ".join(main_words[: cfg.max_prefix_words])
-    suffix = " ".join(main_words[cfg.max_prefix_words :])
+    # determine how much of the soup is a distraction
+    soup_rate = np.random.uniform(cfg.soup_ratio_low_bin, cfg.soup_ratio_high_bin)
+    num_primary_words = int(soup_rate * len(kept_words))
+    num_aux_words = int((1 - soup_rate) * len(kept_words))
+    soup_words = kept_words[:num_primary_words] + kept_aux[:num_aux_words]
+    np.random.shuffle(soup_words)
+    soup_words = soup_words[: cfg.max_soup_words]
+    word_soup = " ".join(soup_words)
 
-    # extra hints for the task (binned noise rates, document count, etc.)
-    hint_str = f"[noise {bin_noise(cfg, cfg.noise_prob)}] [docs {len(aux_texts)}]"
+    # only the soup is punctuation-free
+    whitespace_separated_tokens = text.split()
+    # split the primary text into (prefix, suffix)
+    prefix = " ".join(whitespace_separated_tokens[: cfg.max_prefix_words])
+    # the suffix is the reconstruction target
+    suffix = " ".join(whitespace_separated_tokens[cfg.max_prefix_words :])
+
+    # we use one of 3 labels to hint at the noise rate (numbers don't work well in LMs)
+    noise_bin = nearest_bin_noise(
+        cfg, soup_rate, cfg.soup_ratio_low_bin, cfg.soup_ratio_med_bin, cfg.soup_ratio_high_bin
+    )
+    hint_str = f"[noise {noise_bin}] [docs {len(clean_aux)}]"
 
     if not cfg.save_tokenized:
         return {

@@ -1,6 +1,6 @@
 # pylint: disable=unused-import,unused-argument,W0611,logging-fstring-interpolation
-# type: ignore[reportUnusedImport]
-# ruff: noqa: F401
+### type: ignore[reportUnusedImport]
+### ruff: noqa: F401
 
 """
 ──────────────────────────────────────────────────────────────────────────────
@@ -46,6 +46,7 @@ from typing import Optional
 
 import datasets as hf_datasets
 import numpy as np
+import tqdm
 from icecream import ic
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
@@ -56,6 +57,7 @@ from utils import (
     chunk_text_by_word_count,
     transform_example_word_noise,
     transform_example_word_soup,
+    PATTERN,
 )
 
 logging.basicConfig(
@@ -72,28 +74,31 @@ def prepare_dataset_word_noise(
     """process word noise."""
     logger.info("processing dataset with word noise")
 
-    output_examples = []
-    for document, aux_ex in zip(ds, ds):
+    results = []
+    total_examples = len(ds)
+    for document, aux_ex in tqdm.tqdm(zip(ds, ds), total=total_examples):
+        # we reuse the same aux document for examples derived from same primary document
+        aux = PATTERN.sub("", aux_ex["text"])
+
         # make sure the document is not too short and not too long by partitioning
         chunks = chunk_text_by_word_count(
-            document["text"], cfg.max_words_in_primary, cfg.min_words_in_primary
+            document["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
         )
 
-        # we reuse the same aux document for examples derived from same primary document
         for chunk in chunks:
             result = transform_example_word_noise(
                 text=chunk,
                 cfg=cfg,
                 tokenizer=tokenizer,
-                aux=aux_ex["text"],
+                aux=aux,
             )
 
             if result is None:
                 continue
-            output_examples.append(result)
+            results.append(result)
 
     # construct new dataset
-    out_ds = hf_datasets.Dataset.from_list(output_examples)
+    out_ds = hf_datasets.Dataset.from_list(results)
     logger.info(f"constructed dataset: {len(out_ds)} examples")
     return out_ds
 
@@ -104,10 +109,14 @@ def prepare_dataset_word_soup(
     """process word soup."""
     logger.info("processing dataset with word soup")
 
-    output_examples = []
-    for document, aux1, aux2 in zip(ds, ds, ds):
+    results = []
+    total_examples = len(ds)
+    for document, aux1, aux2 in tqdm.tqdm(zip(ds, ds, ds), total=total_examples):
+        # we reuse the same aux documents for examples derived from same primary document
+        aux = PATTERN.sub("", aux1["text"]) + " " + PATTERN.sub("", aux2["text"])
+
         chunks = chunk_text_by_word_count(
-            document["text"], cfg.max_words_in_primary, cfg.min_words_in_primary
+            document["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
         )
 
         for chunk in chunks:
@@ -115,26 +124,25 @@ def prepare_dataset_word_soup(
                 text=chunk,
                 cfg=cfg,
                 tokenizer=tokenizer,
-                aux_texts=[aux1["text"], aux2["text"]],
+                clean_aux=aux,
             )
             if result is None:
                 continue
-            output_examples.append(result)
+            results.append(result)
 
     # construct new dataset
-    out_ds = hf_datasets.Dataset.from_list(output_examples)
+    out_ds = hf_datasets.Dataset.from_list(results)
     logger.info(f"constructed dataset: {len(out_ds)} examples")
     return out_ds
 
 
 def prepare_data(cfg: DataConfig) -> None:
     """fooberino function."""
-    logger.info("loading dataset")
+    logger.info(f"loading tokenizer: {cfg.tokenizer_name}")
+    tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer_name)
+    logger.info(f"loading dataset: {cfg.dataset_name}")
     dataset = hf_datasets.load_dataset(cfg.dataset_name, split="train")
     logger.info(f"loaded dataset: {len(dataset)} examples")
-
-    tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer_name)
-    logger.info("tokenizer loaded")
 
     if cfg.transform_type == ProcessType.WORD_NOISE:
         out_ds = prepare_dataset_word_noise(cfg, dataset, tokenizer=tokenizer)
@@ -153,12 +161,12 @@ def main() -> None:
     cfg = OmegaConf.structured(DataConfig)
     cli_cfg = OmegaConf.from_cli()
     cfg = OmegaConf.merge(cfg, cli_cfg)
-    cfg = OmegaConf.to_container(cfg, resolve=True)
     try:
+        cfg = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
         cfg = DataConfig(**cfg)
-    except TypeError as e:  # pylint: disable=broad-exception-raised
-        logger.error(f"Error: {e}\n\nUsage: python scratch.py")
-        sys.exit(1)
+    except Exception as e:  # pylint: disable=broad-exception-raised
+        ic(cfg)
+        raise e
     prepare_data(cfg)
 
 
