@@ -52,11 +52,21 @@ from utils import (
     tokenizer_fn,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
+import torch.distributed as dist
+
+def is_main_process() -> bool:
+    return not dist.is_initialized() or dist.get_rank() == 0
+
+if is_main_process():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+else:
+    # Disable logging for non-main processes.
+    logging.basicConfig(level=logging.ERROR)
+
 logger = logging.getLogger(__name__)
 
 
