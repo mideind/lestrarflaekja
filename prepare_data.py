@@ -48,10 +48,12 @@ import datasets as hf_datasets
 import numpy as np
 from icecream import ic
 from omegaconf import OmegaConf
+from transformers import AutoTokenizer
 
 from utils import (
     DataConfig,
     ProcessType,
+    chunk_text_by_word_count,
     transform_example_word_noise,
     transform_example_word_soup,
 )
@@ -64,49 +66,86 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def prepare_dataset_word_noise(cfg: DataConfig, ds: hf_datasets.Dataset) -> None:
+def prepare_dataset_word_noise(
+    cfg: DataConfig, ds: hf_datasets.Dataset, *, tokenizer: AutoTokenizer
+) -> hf_datasets.Dataset:
     """process word noise."""
-    logger.info("process word noise")
-    # primary iterator for examples, zipped with another iterator for auxiliary examples
+    logger.info("processing dataset with word noise")
 
-    results = []
-    for primary_example, aux_ex in zip(ds, ds):
-        res_example = transform_example_word_noise(cfg, primary_example, aux=aux_ex)
-        # ic(res_example)
-        # breakpoint()
-        results.append(res_example)
+    output_examples = []
+    for document, aux_ex in zip(ds, ds):
+        # make sure the document is not too short and not too long by partitioning
+        chunks = chunk_text_by_word_count(
+            document["text"], cfg.max_words_in_primary, cfg.min_words_in_primary
+        )
 
-    # TODO: construct new dataset?
-    return results
+        # we reuse the same aux document for examples derived from same primary document
+        for chunk in chunks:
+            result = transform_example_word_noise(
+                text=chunk,
+                cfg=cfg,
+                tokenizer=tokenizer,
+                aux=aux_ex["text"],
+            )
+
+            if result is None:
+                continue
+            output_examples.append(result)
+
+    # construct new dataset
+    out_ds = hf_datasets.Dataset.from_list(output_examples)
+    logger.info(f"constructed dataset: {len(out_ds)} examples")
+    return out_ds
 
 
-def prepare_dataset_word_soup(cfg: DataConfig, ds: hf_datasets.Dataset) -> None:
+def prepare_dataset_word_soup(
+    cfg: DataConfig, ds: hf_datasets.Dataset, *, tokenizer: AutoTokenizer
+) -> hf_datasets.Dataset:
     """process word soup."""
-    logger.info("process word soup")
-    # primary iterator for examples, zipped with two auxiliary iterators
+    logger.info("processing dataset with word soup")
 
-    results = []
-    for primary_example, aux1, aux2 in zip(ds, ds, ds):
-        res_example = transform_example_word_soup(cfg, primary_example, aux_examples=[aux1, aux2])
-        # ic(res_example)
-        # breakpoint()
-        results.append(res_example)
+    output_examples = []
+    for document, aux1, aux2 in zip(ds, ds, ds):
+        chunks = chunk_text_by_word_count(
+            document["text"], cfg.max_words_in_primary, cfg.min_words_in_primary
+        )
 
-    # TODO: construct new dataset?
-    return results
+        for chunk in chunks:
+            result = transform_example_word_soup(
+                text=chunk,
+                cfg=cfg,
+                tokenizer=tokenizer,
+                aux_texts=[aux1["text"], aux2["text"]],
+            )
+            if result is None:
+                continue
+            output_examples.append(result)
+
+    # construct new dataset
+    out_ds = hf_datasets.Dataset.from_list(output_examples)
+    logger.info(f"constructed dataset: {len(out_ds)} examples")
+    return out_ds
 
 
 def prepare_data(cfg: DataConfig) -> None:
     """fooberino function."""
-    logger.info("fooberino")
+    logger.info("loading dataset")
     dataset = hf_datasets.load_dataset(cfg.dataset_name, split="train")
+    logger.info(f"loaded dataset: {len(dataset)} examples")
 
-    if cfg.process_type == ProcessType.WORD_NOISE:
-        prepare_dataset_word_noise(cfg, dataset)
-    elif cfg.process_type == ProcessType.WORD_SOUP:
-        prepare_dataset_word_soup(cfg, dataset)
+    tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer_name)
+    logger.info("tokenizer loaded")
+
+    if cfg.transform_type == ProcessType.WORD_NOISE:
+        out_ds = prepare_dataset_word_noise(cfg, dataset, tokenizer=tokenizer)
+    elif cfg.transform_type == ProcessType.WORD_SOUP:
+        out_ds = prepare_dataset_word_soup(cfg, dataset, tokenizer=tokenizer)
     else:
         assert False, "Invalid process type"
+
+    logger.info(f"saving dataset to {cfg.output_path}")
+    # save dataset
+    out_ds.save_to_disk(cfg.output_path)
 
 
 def main() -> None:

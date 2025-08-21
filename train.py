@@ -102,6 +102,9 @@ class TruncatedLossTrainer(Trainer):
 
         loss = torch.nn.functional.cross_entropy(flat_logits, flat_labels, reduction="mean")
 
+        nparams = sum(param.numel() for _, param in model.named_parameters() if param.requires_grad)
+        logger.info(f"Number of trainable parameters: {nparams}")
+
         ##########
         ### from super class
 
