@@ -221,7 +221,7 @@ def fooberino(cfg: TrainConfig) -> None:
     base_model = AutoModelForCausalLM.from_pretrained(
         cfg.model_name,
         quantization_config=quantized_config,
-        device_map=device_map,  # Force model to current device
+        # device_map=device_map,  # Force model to current device
         torch_dtype=torch.bfloat16
     )
 
