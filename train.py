@@ -216,14 +216,12 @@ def fooberino(cfg: TrainConfig) -> None:
         bnb_8bit_quant_type="nf8"               # Use normalized float 8-bit
     )
 
-    # Get the current device (important for distributed training)
-    current_device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
-
+    device_map = {'': accelerator.device}
     # Load the base model with specific device mapping
     base_model = AutoModelForCausalLM.from_pretrained(
         cfg.model_name,
         quantization_config=quantized_config,
-        device_map={'': current_device},  # Force model to current device
+        device_map=device_map,  # Force model to current device
         torch_dtype=torch.bfloat16
     )
 
