@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Læsileiki</title>
+</head>
+<body>
+    <h1>Velkomin í Læsileika</h1>
+
+    <!--
+    Eyðublað sem gerir notendum kleift að senda inn texta til greiningar
+    -->
+    <form id="textForm" hx-post="/analyze" hx-target="#result" hx-swap="innerHTML">
+        <h2>Textagreining</h2>
+        <label for="textInput">Sláðu inn texta:</label>
+        <textarea id="textInput" name="textInput" rows="4" cols="50"></textarea>
+        <br>
+        <button type="submit">Greina</button>
+    </form>
+
+    <div id="result">
+        <!-- Niðurstöður birtast hér -->
+    </div>
+
+    <div id="heatmap" class="heatmap">
+        <!-- Hitakort birtist hér -->
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.6/dist/htmx.min.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f8f9fa;
+            margin: 20px;
+            color: #333;
+        }
+
+        .heatmap {
+            margin-top: 30px;
+            background: white;
+            padding: 20px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            line-height: 1.3;
+        }
+
+        .heatmap h3 {
+            margin-top: 0;
+            color: #555;
+        }
+
+        .token-item {
+            display: inline;
+            padding: 2px 4px;
+            font-size: 16px;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s ease;
+        }
+
+        .token-item:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .token-text {
+            font-weight: normal;
+        }
+
+        .tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+            z-index: 1000;
+        }
+
+        .token-item:hover .tooltip {
+            opacity: 1;
+        }
+
+        .tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 4px solid transparent;
+            border-top-color: #333;
+        }
+    </style>
+
+    <script>
+        // Additional JavaScript can be added here
+        const ignore_score_below = 0.2;  // any score below this is levelled to 0.0
+        const response = {
+            "scored_segments": [
+                {"text": "heimur", "score": 0.92},
+                {"text": "fjallgarður", "score": 0.88},
+                {"text": "norðurljós", "score": 0.95},
+                {"text": "þingvellir", "score": 0.0},
+                {"text": "geysirhver", "score": 0.81},
+                {"text": "eldfjall", "score": 0.89},
+                {"text": "bláhvalur", "score": 0.67},
+                {"text": "íslenska", "score": 0.93},
+                {"text": "reykjavík", "score": 0.76},
+                {"text": "saga", "score": 0.85},
+                {"text": "víkingur", "score": 0.78},
+                {"text": "þorskur", "score": 0.71},
+                {"text": "gullfoss", "score": 0.94},
+                {"text": "vatnajökull", "score": 0.83},
+                {"text": "húsavík", "score": 0.69},
+                {"text": "skjálfti", "score": 0.77},
+                {"text": "lundafugl", "score": 0.86},
+                {"text": "hvalaskoðun", "score": 0.74},
+                {"text": "brennivín", "score": 0.82},
+                {"text": "þjóðsaga", "score": 0.91},
+                {"text": "kárahnjúkar", "score": 0.65},
+                {"text": "svarttjörn", "score": 0.79},
+                {"text": "heilsukveðja", "score": 0.87},
+                {"text": "landslag", "score": 0.84},
+                {"text": "íslendingur", "score": 0.90}
+            ]
+        }
+
+        function color_to_score_categorical(score) {
+            // no interpolated color gradient,
+            // just simple thresholds for estimated reading level (fyrsti bekkur, fjórði bekkur, sjöundi bekkur, tíundi bekkur)
+            // the exact thresholds should be based on the calibration checks from the standardized tests (Icelandic reading comprehension section)
+            if (score < 0.3) {
+                // this should be an actual color value
+                return 'fyrsti bekkur';
+            } else if (score < 0.7) {
+                return 'fjórði bekkur';
+            } else if (score < 0.9) {
+                return 'sjöundi bekkur';
+            } else if (score < 1.0) {
+                return 'tíundi bekkur';
+            } else {
+                return 'óþekkt';
+            }
+        }
+
+        function color_to_score_white_yellow_orange_red(score) {
+            // todo
+        }
+
+           function color_to_score(score) {
+            // Clamp score to be between 0 and 1
+            score = Math.max(0, Math.min(1, score));
+
+            let r, g, b;
+
+            // Desaturated colors: White -> Light Orange -> Light Red
+            if (score < 0.5) {
+                // White to Light Orange
+                const t = score * 2; // scale to 0-1
+                r = 255;
+                g = Math.round(255 - 45 * t); // 255 -> 210
+                b = Math.round(255 - 85 * t); // 255 -> 170
+            } else {
+                // Light Orange to Light Red
+                const t = (score - 0.5) * 2; // scale to 0-1
+                r = 255;
+                g = Math.round(210 - 40 * t); // 210 -> 170
+                b = 170;
+            }
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+
+        function color_to_score_green_blue_red(score) {
+            // Low score = good (green), high score = bad (red), neutral = blue
+            // Assuming scores are between 0 and 1
+            if (score < 0.3) {
+                // Low scores - green tones
+                const intensity = Math.round(200 + (55 * score / 0.3));
+                return `rgb(${intensity - 50}, ${intensity}, ${intensity - 50})`;
+            } else if (score > 0.7) {
+                // High scores - red tones
+                const intensity = Math.round(200 + (55 * (score - 0.7) / 0.3));
+                return `rgb(${intensity}, ${intensity - 50}, ${intensity - 50})`;
+            } else {
+                // Light Orange to Light Red
+                const t = (score - 0.5) * 2; // scale to 0-1
+                r = 255;
+                g = Math.round(210 - 40 * t); // 210 -> 170
+                b = 170;
+            }
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+
+        function render_response_with_tooltip() {
+            const heatmapDiv = document.getElementById('heatmap');
+            heatmapDiv.innerHTML = '<h3>Greining á flækjustigi texta</h3><p>Farðu með músina yfir orð til að sjá flækjustig:</p>';
+
+            response.scored_segments.forEach(item => {
+                const tokenElement = document.createElement('span');
+                tokenElement.className = 'token-item';
+                tokenElement.style.backgroundColor = color_to_score(item.score);
+                tokenElement.innerHTML = `
+                    <span class="token-text">${item.text}</span>
+                    <div class="tooltip">Stig: ${item.score.toFixed(2)}</div>
+                `;
+                heatmapDiv.appendChild(tokenElement);
+            });
+        }
+
+        // Create heatmap when page loads
+        document.addEventListener('DOMContentLoaded', render_response_with_tooltip);
+
+    </script>
+</body>
+</html>
