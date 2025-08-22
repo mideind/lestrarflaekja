@@ -214,21 +214,19 @@ def fooberino(cfg: TrainConfig) -> None:
     raw_dataset = hf_datasets.load_dataset(cfg.dataset_name)
 
     # # sample 100 datapoints from the dataset
-    # small_text_ds = hf_datasets.DatasetDict(
-    #     {
-    #         "train": raw_dataset["train"].shuffle(seed=42),
-    #         "validation": raw_dataset["validation"],
-    #         "test": raw_dataset["test"]
-    #     }
-    # )
-
     small_text_ds = hf_datasets.DatasetDict(
         {
-            "train": raw_dataset["train"].shuffle(seed=42).select(range(100)),
-            # "validation": raw_dataset["validation"].shuffle(seed=42).select(range(100)),
-            # "test": raw_dataset["test"].shuffle(seed=42).select(range(100)),
+            "train": raw_dataset["train"]
         }
     )
+
+    # small_text_ds = hf_datasets.DatasetDict(
+    #     {
+    #         "train": raw_dataset["train"].shuffle(seed=42).select(range(100)),
+    #         # "validation": raw_dataset["validation"].shuffle(seed=42).select(range(100)),
+    #         # "test": raw_dataset["test"].shuffle(seed=42).select(range(100)),
+    #     }
+    # )
 
     # Load the base model with specific device mapping
     base_model = AutoModelForCausalLM.from_pretrained(
@@ -276,15 +274,15 @@ def fooberino(cfg: TrainConfig) -> None:
 
     args = TrainingArguments(
         output_dir="./results",
-        per_device_train_batch_size=2,
-        per_device_eval_batch_size=2,
+        per_device_train_batch_size=4,
+        per_device_eval_batch_size=4,
         # eval_strategy="steps",
         # eval_steps=5_000,
-        logging_steps=5_000,
+        logging_steps=5,
         gradient_accumulation_steps=1,
         num_train_epochs=1,
-        weight_decay=0.1,
-        warmup_steps=1_000,
+        weight_decay=0.05,
+        warmup_steps=10,
         lr_scheduler_type="cosine",
         learning_rate=5e-4,
         save_steps=5_000,
