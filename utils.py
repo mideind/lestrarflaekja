@@ -1,33 +1,42 @@
 from dataclasses import dataclass
 from enum import StrEnum
 import re
+from typing import Optional, NamedTuple
+import functools
+from pathlib import Path
 
+from datasets import Dataset, concatenate_datasets
 from omegaconf import MISSING
 import numpy as np
 from transformers import (
     AutoTokenizer,
 )
 
-PATTERN = re.compile(r"[^\w ]", flags=re.UNICODE)
+PAT_ALPHANUMERIC = re.compile(r"[^\w ]", flags=re.UNICODE)
+remove_non_alphanumeric = functools.partial(PAT_ALPHANUMERIC.sub, "")
+PAT_MULTISPACE = re.compile(r"[ \t][ \t]+")
+collapse_multispace = functools.partial(PAT_MULTISPACE.sub, " ")
 
 
-class ProcessType(StrEnum):
-    """Process type."""
+class Transform(StrEnum):
+    """Transform type."""
 
-    WORD_NOISE = "word-noise"
-    WORD_SOUP = "word-soup"
+    scramble = "scramble"
+    soup = "soup"
 
 
 @dataclass
 class DataConfig:
     """Configuration for the project."""
 
+    subset_names: Optional[str] = None
     dataset_name: str = MISSING
     # dataset_name: str = "mideind/mim"
     # dataset_name: str = "mideind/mim-gold-21.05"
     # dataset_name: str = "mideind/is_prototyping_corpus"
+    # subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
     tokenizer_name: str = "AI-Sweden-Models/gpt-sw3-126m"
-    transform_type: ProcessType = ProcessType.WORD_NOISE
+    transform: Transform = Transform.scramble
     permutation_distance: int = 5
     mask_token: str = "<mask>"
     soup_keep_rate: float = 0.66
@@ -45,7 +54,10 @@ class DataConfig:
     save_tokenized: bool = True
     delimiter: str = "<|endoftext|>"  # or any other delimiter you want to use
     use_hint: bool = True
-    output_path: str = "data/word-noise"
+    subshard: Optional[int] = None
+    output_path: Path = MISSING
+    seed: int = 42
+    prefilter_char_count: int = 60
 
 
 @dataclass
@@ -86,7 +98,7 @@ def chunk_text_by_word_count(text: str, min_words: int, max_words: int) -> list[
 
 
 def transform_example_word_noise(
-    text: str, *, cfg: DataConfig, tokenizer: AutoTokenizer, aux: str
+    text: str, *, cfg: DataConfig, enc: AutoTokenizer, aux: str
 ) -> dict:
     """Transform example with word noise.
 
@@ -125,8 +137,11 @@ def transform_example_word_noise(
     # splice the words with randomly selected aux words
     spliced = []
     for i, (word, insert) in enumerate(zip(words, should_insert)):
-        if insert:
-            spliced.append(aux_words[perm[i]])
+        try:
+            if insert:
+                spliced.append(aux_words[perm[i]])
+        except Exception as e:
+            breakpoint()
         spliced.append(word)
     words = spliced
 
@@ -155,53 +170,22 @@ def transform_example_word_noise(
     input_parts = [hint_str, cfg.delimiter] if cfg.use_hint else []
     input_parts.extend([scramble, cfg.delimiter])
     task_input = " ".join(input_parts)
-    task_input = tokenizer(task_input, add_special_tokens=False)["input_ids"]
-    task_output = tokenizer(text, add_special_tokens=False)["input_ids"]
+    task_input = enc(task_input, add_special_tokens=False)["input_ids"]
+    task_output = enc(text, add_special_tokens=False)["input_ids"]
 
     weights = [0] * len(task_input) + [1] * len(task_output)
     input_ids = task_input + task_output
-
-    # fertility = len(tokenizer(example["text"], add_special_tokens=False)["input_ids"]) / len(words)
-    # delim_ntoks = len(tokenizer(cfg.delimiter, add_special_tokens=False)["input_ids"])
-    # delim_ntoks_space = len(tokenizer(" " + cfg.delimiter, add_special_tokens=False)["input_ids"])
-    # hints_ntoks = len(tokenizer(" " + hint_str, add_special_tokens=False)["input_ids"])
-    # hints_ntoks_space = len(tokenizer(" " + hint_str, add_special_tokens=False)["input_ids"])
-    # scramble_ntoks = len(tokenizer(scramble, add_special_tokens=False)["input_ids"])
-    # orig_ntoks = len(tokenizer(example["text"], add_special_tokens=False)["input_ids"])
-
-    # summed = (
-    #     delim_ntoks
-    #     + delim_ntoks_space
-    #     + hints_ntoks
-    #     + hints_ntoks_space
-    #     + scramble_ntoks
-    #     + orig_ntoks
-    # )
-
-    # ic((
-    #     delim_ntoks,
-    #     delim_ntoks_space,
-    #     hints_ntoks,
-    #     hints_ntoks_space,
-    #     scramble_ntoks,
-    #     orig_ntoks,
-    #     len(input_ids),
-    #     summed,
-    #     len(words),
-    #     len(input_ids) / len(words),
-    #     fertility,
-    # ))
-    # # ic((len(words), fertility, len(input_ids)))
 
     return {"input_ids": input_ids, "weights": weights}
 
 
 def transform_example_word_soup(
-    text: str, *, cfg: DataConfig, tokenizer: AutoTokenizer, clean_aux: str
+    text: str, *, cfg: DataConfig, enc: AutoTokenizer, clean_aux: str
 ) -> dict:
     """Transform example with word soup."""
     # extract just the words (without punctuation) from the text
-    cleaned_text = PATTERN.sub("", text)
+    # cleaned_text = PAT_ALPHANUMERIC.sub("", text)
+    cleaned_text = remove_non_alphanumeric(text)
     main_words = set(cleaned_text.split())
     # make sure some words are dropped
     should_keep = np.random.uniform(0, 1, size=len(main_words)) < cfg.soup_keep_rate
@@ -253,8 +237,8 @@ def transform_example_word_soup(
         task_input_parts = [hint_str, cfg.delimiter] + task_input_parts
 
     task_input = " ".join(task_input_parts)
-    task_input = tokenizer(task_input, add_special_tokens=False)["input_ids"]
-    task_output = tokenizer(suffix, add_special_tokens=False)["input_ids"]
+    task_input = enc(task_input, add_special_tokens=False)["input_ids"]
+    task_output = enc(suffix, add_special_tokens=False)["input_ids"]
     input_ids = task_input + task_output
     weights = [0] * len(task_input) + [1] * len(task_output)
 
@@ -264,14 +248,36 @@ def transform_example_word_soup(
     }
 
 
-def encode_word_noise_task(cfg: TrainConfig, example: dict, tokenizer: AutoTokenizer) -> dict:
+class DatasetWithAuxiliary(NamedTuple):
+    main: Dataset
+    aux: Dataset
+
+def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAuxiliary:
+    # drop obviosuly too short examples early
+    ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.prefilter_char_count })  # True means keep
+
+    ds_main = ds.map(lambda x: {"text": collapse_multispace(x["text"]).strip()})
+
+    ds_main_clean = ds_main.map(lambda x: {"text": remove_non_alphanumeric(x["text"]).lower()})
+    ds_clean = ds_main.map(lambda x: {"text": remove_non_alphanumeric(x["text"].lower())})
+
+    # since these are shuffled, we don't need to shuffle ds_main as well
+    ds_aux1 = ds_clean.shuffle(cfg.seed).rename_column("text", "text1")
+    ds_aux2 = ds_aux1.shuffle(cfg.seed).rename_column("text1", "text2")
+    # merge and flatten adjacent examples
+    ds_aux = concatenate_datasets([ds_aux1, ds_aux2], axis=1)
+    ds_aux = ds_aux.map(lambda x: {"text": x["text1"] + " " + x["text2"]})
+    return DatasetWithAuxiliary(ds_main, ds_aux) 
+
+
+def encode_word_noise_task(cfg: TrainConfig, example: dict, enc: AutoTokenizer) -> dict:
     """Tokenize word noise task."""
     input_parts = [example["hint"], cfg.delimiter] if cfg.use_hint else []
     input_parts.extend([example["scramble"], cfg.delimiter])
     task_input = " ".join(input_parts)
 
-    task_input = tokenizer(task_input, add_special_tokens=False)["input_ids"]
-    task_output = tokenizer(example["original"], add_special_tokens=False)["input_ids"]
+    task_input = enc(task_input, add_special_tokens=False)["input_ids"]
+    task_output = enc(example["original"], add_special_tokens=False)["input_ids"]
 
     input_ids = task_input + task_output
     weights = [0] * len(task_input) + [1] * len(task_output)
@@ -279,7 +285,7 @@ def encode_word_noise_task(cfg: TrainConfig, example: dict, tokenizer: AutoToken
     return {"input_ids": input_ids, "loss_weights": weights}
 
 
-def encode_word_soup_task(cfg: TrainConfig, example: dict, tokenizer: AutoTokenizer) -> dict:
+def encode_word_soup_task(cfg: TrainConfig, example: dict, enc: AutoTokenizer) -> dict:
     """Tokenize word soup task."""
     input_parts = [example["hint"], cfg.delimiter] if "hint" in example else []
 
@@ -291,8 +297,8 @@ def encode_word_soup_task(cfg: TrainConfig, example: dict, tokenizer: AutoTokeni
     ])
     task_input = " ".join(input_parts)
 
-    task_input = tokenizer(task_input, add_special_tokens=False)["input_ids"]
-    task_output = tokenizer(example["suffix"], add_special_tokens=False)["input_ids"]
+    task_input = enc(task_input, add_special_tokens=False)["input_ids"]
+    task_output = enc(example["suffix"], add_special_tokens=False)["input_ids"]
 
     input_ids = task_input + task_output
     weights = [0] * len(task_input) + [1] * len(task_output)
@@ -300,14 +306,14 @@ def encode_word_soup_task(cfg: TrainConfig, example: dict, tokenizer: AutoTokeni
     return {"input_ids": input_ids, "loss_weights": weights}
 
 
-def tokenizer_fn(cfg: TrainConfig, example: dict, tokenizer: AutoTokenizer) -> dict:
+def tokenizer_fn(cfg: TrainConfig, example: dict, enc: AutoTokenizer) -> dict:
     """Tokenize and pack sequences to minimize waste."""
     # Tokenize all texts
     all_tokens = []
     for text in example["text"]:
-        tokens = tokenizer(text, add_special_tokens=False)["input_ids"]
+        tokens = enc(text, add_special_tokens=False)["input_ids"]
         all_tokens.extend(tokens)
-        all_tokens.append(tokenizer.eos_token_id)  # Add separator between texts
+        all_tokens.append(enc.eos_token_id)  # Add separator between texts
 
     # Segment into fixed-length sequences
     input_batch = []

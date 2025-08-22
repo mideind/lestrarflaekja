@@ -3,38 +3,33 @@
 ### ruff: noqa: F401
 
 """
-──────────────────────────────────────────────────────────────────────────────
-# Dagur 1:
+Data prep for task
 
-1. velja gagnasafn til bráðabirgða
-    ✓ https://huggingface.co/datasets/mideind/mim
-    - https://huggingface.co/datasets/mideind/is_prototyping_corpus (kannski seinna)
+──────────
 
-2. velja líkan til bráðabirgða
-    ✓ https://huggingface.co/AI-Sweden-Models/gpt-sw3-126m/
-    - https://huggingface.co/AI-Sweden-Models/gpt-sw3-356m/ (kannski seinna)
-    - https://huggingface.co/AI-Sweden-Models/gpt-sw3-1.3b/ (kannski enn síðar)
+Usage:
 
-3. forrita gagnavarpanir
-   a) endursmíði úr (orðabrengli)
-   b) endursmíði úr (orðasúpu og forskeyti skjals)
-   c) framkvæma endursmíðivarpanir
+    make soup:
+    python prepare_data.py transform=soup output_path=data/isl_desoup dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
 
-4. forrita þjálfunarskriftu sem notar (líkan, vörpuð gögn)
+    make scramble:
+    python prepare_data.py transform=scramble output_path=data/isl_descramble dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
 
-5. loss masking fyrir endursmíðiverkefnin
+──────────
 
-6. laga gagnadreifingu (auka vægi ákveðinna texta m. frumstæðum aðferðum)
+Usage:
 
-7. setja af stað remote þjálfanir hjá RunPod af gerðunum (vanillu, brengl, súpu),
-   ekki til að keyra á minni eigin tölvu.
+    make small soup:
+    python prepare_data.py subshard=10 transform=soup output_path=data/isl_desoup dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
 
-8. fara heim
+    make small scramble:
+    python prepare_data.py subshard=10 transform=scramble output_path=data/isl_descramble dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
 
-──────────────────────────────────────────────────────────────────────────────
-# Dagur 2:
+──────────
 
-1. vantar að klippa skjölin í búta 512 orða búta
+Debug:
+
+    python prepare_data.py subshard=1000 transform=scramble output_path=data/isl_debug.scramble dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi && python prepare_data.py subshard=1000 transform=soup output_path=data/isl_debug.soup dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi
 """
 
 import logging
@@ -45,6 +40,7 @@ from enum import StrEnum
 from typing import Optional
 
 import datasets as hf_datasets
+from datasets import concatenate_datasets
 import numpy as np
 import tqdm
 from icecream import ic
@@ -53,11 +49,15 @@ from transformers import AutoTokenizer
 
 from utils import (
     DataConfig,
-    ProcessType,
+    Transform,
     chunk_text_by_word_count,
     transform_example_word_noise,
     transform_example_word_soup,
-    PATTERN,
+    PAT_ALPHANUMERIC,
+    remove_non_alphanumeric,
+    PAT_MULTISPACE,
+    collapse_multispace,
+    normalize_and_make_auxiliary,
 )
 
 logging.basicConfig(
@@ -69,91 +69,115 @@ logger = logging.getLogger(__name__)
 
 
 def prepare_dataset_word_noise(
-    cfg: DataConfig, ds: hf_datasets.Dataset, *, tokenizer: AutoTokenizer
-) -> hf_datasets.Dataset:
+    cfg: DataConfig, ds: hf_datasets.Dataset, *, enc: AutoTokenizer
+) -> list[dict]:
     """process word noise."""
     logger.info("processing dataset with word noise")
 
-    results = []
-    total_examples = len(ds)
-    for document, aux_ex in tqdm.tqdm(zip(ds, ds), total=total_examples):
-        # we reuse the same aux document for examples derived from same primary document
-        aux = PATTERN.sub("", aux_ex["text"])
+    augm_ds = normalize_and_make_auxiliary(cfg, ds)
 
+    examples = []
+    for doc, aux in tqdm.tqdm(zip(augm_ds.main, augm_ds.aux), total=len(augm_ds)):
         # make sure the document is not too short and not too long by partitioning
         chunks = chunk_text_by_word_count(
-            document["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
+            doc["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
         )
 
+        # we reuse the same aux document for examples derived from same primary document
         for chunk in chunks:
             result = transform_example_word_noise(
                 text=chunk,
                 cfg=cfg,
-                tokenizer=tokenizer,
-                aux=aux,
+                enc=enc,
+                aux=aux["text"],
             )
 
             if result is None:
                 continue
-            results.append(result)
+            examples.append(result)
 
-    # construct new dataset
-    out_ds = hf_datasets.Dataset.from_list(results)
-    logger.info(f"constructed dataset: {len(out_ds)} examples")
-    return out_ds
+    return examples
 
 
 def prepare_dataset_word_soup(
-    cfg: DataConfig, ds: hf_datasets.Dataset, *, tokenizer: AutoTokenizer
-) -> hf_datasets.Dataset:
+    cfg: DataConfig, ds: hf_datasets.Dataset, *, enc: AutoTokenizer
+) -> list[dict]:
     """process word soup."""
     logger.info("processing dataset with word soup")
 
-    results = []
-    total_examples = len(ds)
-    for document, aux1, aux2 in tqdm.tqdm(zip(ds, ds, ds), total=total_examples):
-        # we reuse the same aux documents for examples derived from same primary document
-        aux = PATTERN.sub("", aux1["text"]) + " " + PATTERN.sub("", aux2["text"])
+    augm_ds = normalize_and_make_auxiliary(cfg, ds)
+
+    examples = []
+    for doc, aux in tqdm.tqdm(zip(augm_ds.main, augm_ds.aux), total=len(augm_ds)):
 
         chunks = chunk_text_by_word_count(
-            document["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
+            doc["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
         )
 
         for chunk in chunks:
             result = transform_example_word_soup(
                 text=chunk,
                 cfg=cfg,
-                tokenizer=tokenizer,
-                clean_aux=aux,
+                enc=enc,
+                clean_aux=aux["text"],
             )
             if result is None:
                 continue
-            results.append(result)
+            examples.append(result)
 
-    # construct new dataset
-    out_ds = hf_datasets.Dataset.from_list(results)
-    logger.info(f"constructed dataset: {len(out_ds)} examples")
-    return out_ds
+    return examples
 
 
 def prepare_data(cfg: DataConfig) -> None:
-    """fooberino function."""
+    """The fooberino."""
     logger.info(f"loading tokenizer: {cfg.tokenizer_name}")
-    tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer_name)
+    enc = AutoTokenizer.from_pretrained(cfg.tokenizer_name)
     logger.info(f"loading dataset: {cfg.dataset_name}")
-    dataset = hf_datasets.load_dataset(cfg.dataset_name, split="train")
-    logger.info(f"loaded dataset: {len(dataset)} examples")
 
-    if cfg.transform_type == ProcessType.WORD_NOISE:
-        out_ds = prepare_dataset_word_noise(cfg, dataset, tokenizer=tokenizer)
-    elif cfg.transform_type == ProcessType.WORD_SOUP:
-        out_ds = prepare_dataset_word_soup(cfg, dataset, tokenizer=tokenizer)
+    logger.info(f"task type: {cfg.transform.value}")
+    preprocess_fns = {
+        Transform.scramble: prepare_dataset_word_noise,
+        Transform.soup: prepare_dataset_word_soup,
+    }
+
+    subset_names = [] if cfg.subset_names is None else cfg.subset_names.split(",")
+    if subset_names:
+        logger.info(f"dataset subset_names: {subset_names}")
+
+    # no subsets to think of
+    if not subset_names:
+        ds = hf_datasets.load_dataset(cfg.dataset_name, split="train")
+        logger.info(f"loaded dataset: {len(dataset)} examples")
+        examples = preprocess_fns[cfg.transform](cfg, ds, enc=enc)
+        logger.info(f"──────────────────────────────")
+
     else:
-        assert False, "Invalid process type"
+        # we want distractors to be similar to reconstruction target
+        # therefore each subset has to be handled individually
+        # instead of combining all into one first
+        examples = []
+        for name in subset_names:
+            subset_ds = hf_datasets.load_dataset(cfg.dataset_name, name=name, split="train")
 
-    logger.info(f"saving dataset to {cfg.output_path}")
-    # save dataset
-    out_ds.save_to_disk(cfg.output_path)
+            # subsample by sharding if requested
+            if cfg.subshard is not None:
+                subset_ds = subset_ds.shard(cfg.subshard, 0)
+
+            logger.info(f"loaded subset '{name}': {len(subset_ds)} examples")
+
+            subset_examples = preprocess_fns[cfg.transform](cfg, subset_ds, enc=enc)
+            logger.info(f"total examples from '{name}': {len(subset_examples)}")
+            logger.info(f"──────────────────────────────")
+
+            examples.extend(subset_examples)
+
+    logger.info(f"total examples: {len(examples)}")
+    logger.info(f"saving dataset to: {cfg.output_path}")
+
+    out_ds = hf_datasets.Dataset.from_list(examples)
+    out_ds.save_to_disk(str(cfg.output_path))
+
+    return out_ds
 
 
 def main() -> None:
