@@ -46,8 +46,9 @@ class TrainConfig:
 
     # dataset_name: str = "mideind/mim"
     # dataset_name: str = "mideind/mim-gold-21.05"
-    dataset_name: str = "vesteinn/babylm"
+    # dataset_name: str = "vesteinn/babylm"
     # dataset_name: str = "mideind/is_prototyping_corpus"
+    dataset_name: str = "mideind/scramble"
     model_name: str = "AI-Sweden-Models/gpt-sw3-126m"
     context_len: int = 512
     delimiter: str = "<|endoftext|>"  # or any other delimiter you want to use
