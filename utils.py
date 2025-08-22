@@ -23,6 +23,7 @@ class Transform(StrEnum):
 
     scramble = "scramble"
     soup = "soup"
+    vanilla = "vanilla"
 
 
 @dataclass
@@ -56,6 +57,7 @@ class DataConfig:
     use_hint: bool = True
     subshard: Optional[int] = None
     output_path: Path = MISSING
+    output_repoid: Optional[str] = None
     seed: int = 42
     prefilter_char_count: int = 60
 
@@ -96,6 +98,16 @@ def chunk_text_by_word_count(text: str, min_words: int, max_words: int) -> list[
     text_parts = [" ".join(part) for part in text_parts]
     return text_parts
 
+
+def transform_vanilla(
+    text: str, *, cfg: DataConfig, enc: AutoTokenizer
+) -> dict:
+    """vanilla."""
+
+    task_input = enc(text, add_special_tokens=False)["input_ids"]
+    return {
+        "input_ids": task_input,
+    }
 
 def transform_example_word_noise(
     text: str, *, cfg: DataConfig, enc: AutoTokenizer, aux: str

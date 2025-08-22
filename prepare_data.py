@@ -5,32 +5,50 @@
 """
 Data prep for task
 
-──────────
+────────────────────────────────────────────────────────────────────────────────
 
-Usage:
+# Usage
 
-    make soup:
-    python prepare_data.py output_path=data/isl_desoup transform=soup dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
-
-    make scramble:
-    python prepare_data.py output_path=data/isl_descramble transform=scramble dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
-
-──────────
-
-Usage:
-
-    make small soup:
+make small soup:
     python prepare_data.py output_path=data/isl_desoup subshard=10 transform=soup dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
 
-    make small scramble:
+make small scramble:
     python prepare_data.py output_path=data/isl_descramble subshard=10 transform=scramble dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
 
-──────────
+────────────────────────────────────────────────────────────────────────────────
 
-Debug:
+# Debug
 
-    python prepare_data.py output_path=data/isl_debug.scramble subshard=1000 transform=scramble dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi && python prepare_data.py subshard=1000 transform=soup output_path=data/isl_debug.soup dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi
+    python prepare_data.py output_path=data/isl_debug.scramble subshard=1000 transform=scramble dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi output_path=data/isl_debug.scramble
+
+    python prepare_data.py output_path=data/isl_debug.vanilla subshard=1000 transform=vanilla dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi output_path=data/isl_debug.vanilla
+
+────────────────────────────────────────────────────────────────────────────────
+
+# Pushing
+    
+scramble:
+    python prepare_data.py output_repoid=mideind/scramble.debug output_path=data/isl_debug.scramble subshard=1000 transform=scramble dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi,hugi
+
+soup:
+    python prepare_data.py output_repoid=mideind/soup.debug output_path=data/isl_debug.soup subshard=1000 transform=soup dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi,hugi
+
+local:
+    python push_local_to_hub.py  local_path=data/isl_debug.soup  repoid=mideind/soup.debug
+
+────────────────────────────────────────────────────────────────────────────────
+
+fooscratch
+
+python prepare_data.py \
+    output_path=data/isl_descramble \
+    transform=scramble \
+    subshard=1000 \
+    dataset_name=mideind/is_prototyping_corpus \
+    subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
+
 """
+
 
 import logging
 import os
@@ -53,6 +71,7 @@ from utils import (
     chunk_text_by_word_count,
     transform_example_word_noise,
     transform_example_word_soup,
+    transform_vanilla,
     PAT_ALPHANUMERIC,
     remove_non_alphanumeric,
     PAT_MULTISPACE,
@@ -127,6 +146,33 @@ def prepare_dataset_word_soup(
 
     return examples
 
+def prepare_dataset_vanilla(
+    cfg: DataConfig, ds: hf_datasets.Dataset, *, enc: AutoTokenizer
+) -> list[dict]:
+    """process vanilla."""
+    logger.info("processing dataset with vanilla")
+
+    ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.prefilter_char_count })  # True means keep
+    ds = ds.map(lambda x: {"text": collapse_multispace(x["text"]).strip()})
+
+    examples = []
+    for doc in tqdm.tqdm(ds, total=len(ds)):
+
+        chunks = chunk_text_by_word_count(
+            doc["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
+        )
+
+        for chunk in chunks:
+            result = transform_vanilla(
+                text=chunk,
+                cfg=cfg,
+                enc=enc,
+            )
+            if result is None:
+                continue
+            examples.append(result)
+
+    return examples
 
 def prepare_data(cfg: DataConfig) -> None:
     """The fooberino."""
@@ -138,6 +184,7 @@ def prepare_data(cfg: DataConfig) -> None:
     preprocess_fns = {
         Transform.scramble: prepare_dataset_word_noise,
         Transform.soup: prepare_dataset_word_soup,
+        Transform.vanilla: prepare_dataset_vanilla,
     }
 
     subset_names = [] if cfg.subset_names is None else cfg.subset_names.split(",")
@@ -176,6 +223,10 @@ def prepare_data(cfg: DataConfig) -> None:
 
     out_ds = hf_datasets.Dataset.from_list(examples)
     out_ds.save_to_disk(str(cfg.output_path))
+
+    if cfg.output_repoid is not None:
+        logger.info(f"pushing to huggingface hub: '{cfg.output_repoid}'")
+        out_ds.push_to_hub(cfg.output_repoid)
 
     return out_ds
 
