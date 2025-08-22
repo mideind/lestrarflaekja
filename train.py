@@ -239,13 +239,14 @@ def fooberino(cfg: TrainConfig) -> None:
     model.accepts_loss_kwargs = False
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
 
-    tokenize = functools.partial(tokenizer_fn, cfg=cfg, tokenizer=tokenizer)
+    # tokenize = functools.partial(tokenizer_fn, cfg=cfg, tokenizer=tokenizer)
     # tokenize the dataset
-    small_ds = small_text_ds.map(
-        tokenize,
-        batched=True,
-        remove_columns=small_text_ds["train"].column_names,
-    )
+    # small_ds = small_text_ds.map(
+    #     tokenize,
+    #     batched=True,
+    #     remove_columns=small_text_ds["train"].column_names,
+    # )
+    small_ds = small_text_ds
 
     data_collator = ReconstructionTaskCollator(tokenizer=tokenizer, mlm=False)
 
