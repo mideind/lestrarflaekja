@@ -26,6 +26,19 @@ og svo:
 
 ```
 accelerate launch --multi-gpu train.py dataset_name="mideind/scramble"
+```
+
+
+
+hlada likaninu nidur:
+
+scp -r -i ~/.ssh/data.mideind.is trained_model_01 data.mideind.is:/data/lestrarflaekja/trained_model_01
+
+
+breyta i tar:
+tar cf lestrarflaekja.tar ./trained_model_01
+
+setja a data.mideind.is
 """
 
 import functools
@@ -50,6 +63,7 @@ from utils import (
     TrainConfig,
     tokenizer_fn,
 )
+import random
 
 from accelerate import Accelerator
 
@@ -294,7 +308,18 @@ def fooberino(cfg: TrainConfig) -> None:
     # Save the model
     if accelerator.is_main_process:
         logger.info("Saving the model...")
-    trainer.save_model("./trained_model")
+
+    try:
+        trainer.save_model(f"./{cfg.model_output_name}")
+    except Exception as e:
+        logger.error(f"Error saving model: {e}")
+
+        name_with_hash = "result_model" + random.randint(0, 10000)
+
+        try:
+            trainer.save_model(f"./{name_with_hash}")
+        except Exception as e:
+            logger.error(f"Error saving model with hash: {e}")
 
 
 def main() -> None:
