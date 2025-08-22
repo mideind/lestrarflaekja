@@ -203,6 +203,11 @@ def tokenizer_fn( example: dict, tokenizer: AutoTokenizer, cfg: TrainConfig) -> 
     """Tokenize and pack sequences to minimize waste."""
     # Tokenize all texts
     all_tokens = []
+
+    if "text" not in example and "input_ids" in example:
+        # dataset already tokenized
+        return example
+
     for text in example["text"]:
         tokens = tokenizer(text, add_special_tokens=False)["input_ids"]
         all_tokens.extend(tokens)

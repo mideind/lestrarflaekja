@@ -17,15 +17,15 @@
 
 
 
-Fyrir 1 gpu þjálfun:
+fyrir multi-gpu þjálfun:
 ```
-torchrun --standalone --nnodes=1 --nproc-per-node=gpu train.py
+accelerate config
 ```
 
-fyrir 8 gpu þjálfun:
+og svo:
+
 ```
-torchrun --standalone --nnodes=1 --nproc-per-node=8 train.py
-```
+accelerate launch --multi-gpu train.py dataset_name="mideind/scramble"
 """
 
 import functools
@@ -202,7 +202,7 @@ def fooberino(cfg: TrainConfig) -> None:
     # sample 100 datapoints from the dataset
     small_text_ds = hf_datasets.DatasetDict(
         {
-            "train": raw_dataset["train"].shuffle(seed=42).select(range(1000)),
+            "train": raw_dataset["train"].shuffle(seed=42).select(range(100)),
             "validation": raw_dataset["validation"].shuffle(seed=42).select(range(100)),
             "test": raw_dataset["test"].shuffle(seed=42).select(range(100)),
         }
