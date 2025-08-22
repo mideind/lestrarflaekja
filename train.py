@@ -25,7 +25,7 @@ accelerate config
 og svo:
 
 ```
-accelerate launch --multi-gpu train.py dataset_name="mideind/scramble"
+accelerate launch --multi-gpu train.py dataset_name="mideind/vanilla.debug" model_output_name="trained_model_01_vanilla"
 ```
 
 
@@ -308,16 +308,16 @@ def fooberino(cfg: TrainConfig) -> None:
         logger.info("Saving the model...")
 
     try:
-        trainer.save_model(f"./{cfg.model_output_name}")
+        trainer.save_model(f"./trained_model_01_vanilla")
     except Exception as e:
         logger.error(f"Error saving model: {e}")
 
-        name_with_hash = "result_model" + random.randint(0, 10000)
+        # name_with_hash = "result_model" + random.randint(0, 10000)
 
-        try:
-            trainer.save_model(f"./{name_with_hash}")
-        except Exception as e:
-            logger.error(f"Error saving model with hash: {e}")
+        # try:
+        #     trainer.save_model(f"./{name_with_hash}")
+        # except Exception as e:
+        #     logger.error(f"Error saving model with hash: {e}")
 
 
 def main() -> None:
