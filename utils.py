@@ -192,7 +192,7 @@ def transform_example_word_noise(
 
 
 def transform_example_word_soup(
-    text: str, *, cfg: DataConfig, enc: AutoTokenizer, clean_aux: str
+    text: str, *, cfg: DataConfig, enc: AutoTokenizer, aux: str
 ) -> dict:
     """Transform example with word soup."""
     # extract just the words (without punctuation) from the text
@@ -204,7 +204,7 @@ def transform_example_word_soup(
     kept_words = [word for (word, keep) in zip(main_words, should_keep) if keep]
 
     # distractor words from auxiliary texts
-    aux_words = set(clean_aux.split())
+    aux_words = set(aux.split())
     aux_words = [word for word in aux_words if word in main_words]
     should_keep = np.random.uniform(0, 1, size=len(aux_words)) < cfg.soup_keep_rate
     kept_aux = set([word for (word, keep) in zip(aux_words, should_keep) if keep])
@@ -233,7 +233,7 @@ def transform_example_word_soup(
     noise_bin = nearest_bin_noise(
         cfg, soup_rate, cfg.soup_ratio_low_bin, cfg.soup_ratio_med_bin, cfg.soup_ratio_high_bin
     )
-    hint_str = f"[noise {noise_bin}] [docs {len(clean_aux)}]"
+    hint_str = f"[noise {noise_bin}] [docs {len(aux)}]"
 
     if not cfg.save_tokenized:
         return {
