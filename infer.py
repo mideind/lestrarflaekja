@@ -36,14 +36,14 @@ distractors = collapse_multispace(distractors.lower())
 distractors = remove_non_alphanumeric(distractors)
 
 
-# # vanilla
-# inputs_vanilla = transform_vanilla(example_text, cfg=cfg, enc=enc)
-# ids_vanilla = torch.tensor(inputs_vanilla["input_ids"]).unsqueeze(0)
-# model_out = model(input_ids=ids_vanilla, labels=ids_vanilla)
-# target_ids = ids_vanilla.roll(-1)
-# surprisal = torch.gather(model_out.logits.log_softmax(-1), dim=2, index=target_ids.unsqueeze(-1))
-# surprisal = surprisal.squeeze(-1)
-# surprisal_vanilla = surprisal.squeeze(0)
+# vanilla
+inputs_vanilla = transform_vanilla(example_text, cfg=cfg, enc=enc)
+ids_vanilla = torch.tensor(inputs_vanilla["input_ids"]).unsqueeze(0)
+model_out = model(input_ids=ids_vanilla, labels=ids_vanilla)
+target_ids = ids_vanilla.roll(-1)
+surprisal = torch.gather(model_out.logits.log_softmax(-1), dim=2, index=target_ids.unsqueeze(-1))
+surprisal = surprisal.squeeze(-1)
+surprisal_vanilla = surprisal.squeeze(0)
 
 
 # # scramble
