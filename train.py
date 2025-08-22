@@ -275,7 +275,7 @@ def fooberino(cfg: TrainConfig) -> None:
         args=args,
         data_collator=data_collator,
         train_dataset=small_ds["train"],
-        eval_dataset=small_ds["validation"],
+        # eval_dataset=small_ds["validation"],
     )
 
     # Train the model
