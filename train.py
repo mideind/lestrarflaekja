@@ -308,7 +308,7 @@ def fooberino(cfg: TrainConfig) -> None:
         logger.info("Saving the model...")
 
     try:
-        trainer.save_model(f"./trained_model_01_vanilla")
+        trainer.save_model(f"./trained_model_01_desoup")
     except Exception as e:
         logger.error(f"Error saving model: {e}")
 
