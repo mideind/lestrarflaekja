@@ -199,12 +199,20 @@ def fooberino(cfg: TrainConfig) -> None:
         logger.info(f"Loading dataset: {cfg.dataset_name}")
     raw_dataset = hf_datasets.load_dataset(cfg.dataset_name)
 
-    # sample 100 datapoints from the dataset
+    # # sample 100 datapoints from the dataset
+    # small_text_ds = hf_datasets.DatasetDict(
+    #     {
+    #         "train": raw_dataset["train"].shuffle(seed=42),
+    #         "validation": raw_dataset["validation"],
+    #         "test": raw_dataset["test"]
+    #     }
+    # )
+
     small_text_ds = hf_datasets.DatasetDict(
         {
             "train": raw_dataset["train"].shuffle(seed=42).select(range(100)),
-            "validation": raw_dataset["validation"].shuffle(seed=42).select(range(100)),
-            "test": raw_dataset["test"].shuffle(seed=42).select(range(100)),
+            # "validation": raw_dataset["validation"].shuffle(seed=42).select(range(100)),
+            # "test": raw_dataset["test"].shuffle(seed=42).select(range(100)),
         }
     )
 
