@@ -25,7 +25,9 @@ class DataConfig:
     # dataset_name: str = "mideind/mim"
     dataset_name: str = "mideind/mim-gold-21.05"
     # dataset_name: str = "mideind/is_prototyping_corpus"
-    model_name: str = "AI-Sweden-Models/gpt-sw3-126m"
+    # model_name: str = "AI-Sweden-Models/gpt-sw3-126m"
+    model_name: str = "AI-Sweden-Models/gpt-sw3-1.3b"
+    model_output_name: str = "gpt-sw3-126m-word-noise"
     process_type: ProcessType = ProcessType.WORD_NOISE
     noise_prob: float = 0.02
     permutation_distance: int = 2
@@ -37,7 +39,7 @@ class DataConfig:
     bin_noise_medium: float = 0.025
     bin_noise_high: float = 0.05
     context_len: int = 512
-    tokenizer_name: str = "AI-Sweden-Models/gpt-sw3-126m"
+    tokenizer_name: str = "AI-Sweden-Models/gpt-sw3-1.3b"
 
 
 @dataclass
