@@ -212,6 +212,7 @@ def fooberino(cfg: TrainConfig) -> None:
     if accelerator.is_main_process:
         logger.info(f"Loading dataset: {cfg.dataset_name}")
     raw_dataset = hf_datasets.load_dataset(cfg.dataset_name)
+    raw_dataset = raw_dataset.filter(lambda x: 100 < len(x[input_ids]) < 1024)
 
     # # sample 100 datapoints from the dataset
     small_text_ds = hf_datasets.DatasetDict(
