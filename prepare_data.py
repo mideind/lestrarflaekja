@@ -10,26 +10,26 @@ Data prep for task
 Usage:
 
     make soup:
-    python prepare_data.py transform=soup output_path=data/isl_desoup dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
+    python prepare_data.py output_path=data/isl_desoup transform=soup dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
 
     make scramble:
-    python prepare_data.py transform=scramble output_path=data/isl_descramble dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
+    python prepare_data.py output_path=data/isl_descramble transform=scramble dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
 
 ──────────
 
 Usage:
 
     make small soup:
-    python prepare_data.py subshard=10 transform=soup output_path=data/isl_desoup dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
+    python prepare_data.py output_path=data/isl_desoup subshard=10 transform=soup dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
 
     make small scramble:
-    python prepare_data.py subshard=10 transform=scramble output_path=data/isl_descramble dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
+    python prepare_data.py output_path=data/isl_descramble subshard=10 transform=scramble dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid
 
 ──────────
 
 Debug:
 
-    python prepare_data.py subshard=1000 transform=scramble output_path=data/isl_debug.scramble dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi && python prepare_data.py subshard=1000 transform=soup output_path=data/isl_debug.soup dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi
+    python prepare_data.py output_path=data/isl_debug.scramble subshard=1000 transform=scramble dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi && python prepare_data.py subshard=1000 transform=soup output_path=data/isl_debug.soup dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi
 """
 
 import logging
