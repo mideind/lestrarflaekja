@@ -56,10 +56,13 @@ class DataConfig:
     delimiter: str = "<|endoftext|>"  # or any other delimiter you want to use
     use_hint: bool = True
     subshard: Optional[int] = None
-    output_path: Path = MISSING
+    output_path: Path = None
     output_repoid: Optional[str] = None
     seed: int = 42
-    coarse_prefilter_char_count: int = 60
+    coarse_prefilter_min_chars: int = 60
+
+    def __post_init__(self):
+        assert not (self.output_path is None and self.output_repoid is None)
 
 
 @dataclass

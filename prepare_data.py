@@ -28,7 +28,7 @@ make small scramble:
 
     python prepare_data.py output_path=data/isl_debug.scramble subshard=1000 transform=scramble dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid  output_path=data/isl_debug.scramble output_repoid=mideind/scramble.debug
     python prepare_data.py output_path=data/isl_debug.soup subshard=1000 transform=soup dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid  output_path=data/isl_debug.soup output_repoid=mideind/soup.debug
-python prepare_data.py output_path=data/isl_debug.vanilla subshard=1000 transform=vanilla dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid output_path=data/isl_debug.vanilla output_repoid=mideind/vanilla.debug
+    python prepare_data.py output_path=data/isl_debug.vanilla subshard=1000 transform=vanilla dataset_name=mideind/is_prototyping_corpus subset_names=blog.is,hugi,hugi,hugi,ic3v2,igc,mim,rafbokavefurinn,skemman,studentabladid output_path=data/isl_debug.vanilla output_repoid=mideind/vanilla.debug
 
 ────────────────────────────────────────────────────────────────────────────────
 
@@ -159,7 +159,7 @@ def prepare_dataset_vanilla(
     logger.info("processing dataset with vanilla")
 
     ds = ds.filter(
-        lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_char_count}
+        lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars}
     )  # True means keep
     ds = ds.map(lambda x: {"text": collapse_multispace(x["text"]).strip()})
 
