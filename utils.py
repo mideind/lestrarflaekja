@@ -195,52 +195,57 @@ def transform_example_word_noise(
 
 
 def transform_example_word_soup(
-    text: str, *, cfg: DataConfig, enc: AutoTokenizer, aux: str
+        text: str, *, text_clean, text_aux: str, cfg: DataConfig, enc: AutoTokenizer
 ) -> dict:
     """Transform example with word soup."""
-    # extract just the words (without punctuation) from the text
-    # cleaned_text = PAT_ALPHANUMERIC.sub("", text)
-    cleaned_text = remove_non_alphanumeric(text)
-    main_words = set(cleaned_text.split())
+    src_words = set(text_clean.split())
     # make sure some words are dropped
-    should_keep = np.random.uniform(0, 1, size=len(main_words)) < cfg.soup_keep_rate
-    kept_words = [word for (word, keep) in zip(main_words, should_keep) if keep]
+    should_keep = np.random.uniform(0, 1, size=len(src_words)) < cfg.soup_keep_rate
+    kept_src_words = [word for (word, keep) in zip(src_words, should_keep) if keep]
 
     # distractor words from auxiliary texts
-    aux_words = set(aux.split())
-    aux_words = [word for word in aux_words if word in main_words]
-    should_keep = np.random.uniform(0, 1, size=len(aux_words)) < cfg.soup_keep_rate
-    kept_aux = set([word for (word, keep) in zip(aux_words, should_keep) if keep])
+    distractors = set(text_aux.split())
+    distractors = [word for word in distractors if word in src_words]
+    should_keep = np.random.uniform(0, 1, size=len(distractors)) < cfg.soup_keep_rate
+    kept_distractors = set([word for (word, keep) in zip(distractors, should_keep) if keep])
 
     # convert to list and shuffle
-    kept_aux = list(kept_aux)
-    np.random.shuffle(kept_aux)
+    kept_distractors = list(kept_distractors)
+    np.random.shuffle(kept_distractors)
 
     # determine how much of the soup is a distraction
-    soup_rate = np.random.uniform(cfg.soup_ratio_low_bin, cfg.soup_ratio_high_bin)
-    num_primary_words = int(soup_rate * len(kept_words))
-    num_aux_words = int((1 - soup_rate) * len(kept_words))
-    soup_words = kept_words[:num_primary_words] + kept_aux[:num_aux_words]
-    np.random.shuffle(soup_words)
-    soup_words = soup_words[: cfg.max_soup_words]
-    word_soup = " ".join(soup_words)
+    soup_ratio = np.random.uniform(cfg.soup_ratio_low_bin, cfg.soup_ratio_high_bin)
+    # we mix part of the source document...
+    num_src_words = int(soup_ratio * len(kept_src_words))
+    # with some distractors...
+    num_distractors = int((1 - soup_ratio) * len(kept_src_words))
+    # to make a soup
+    the_soup = kept_src_words[:num_src_words] + kept_distractors[:num_distractors]
+    # mix the soup
+    np.random.shuffle(the_soup)
+    # shouldn't be necessary, but just in case
+    the_soup = the_soup[: cfg.max_soup_words]
+    # bake the soup
+    word_soup = " ".join(the_soup)
 
-    # only the soup is punctuation-free
+    # the target text is not normalized and still may have punctuation and such,
+    # we want to put some of it as an orderly side plate next to the soup without mixing it
     whitespace_separated_tokens = text.split()
-    # split the primary text into (prefix, suffix)
+    # separate the source document into (prefix, suffix)
+    # the prefix is and the soup are the inputs for the task
     prefix = " ".join(whitespace_separated_tokens[: cfg.max_prefix_words])
-    # the suffix is the reconstruction target
+    # the task is to "reconstruct" the suffix (so they are the targets)
     suffix = " ".join(whitespace_separated_tokens[cfg.max_prefix_words :])
 
     # we use one of 3 labels to hint at the noise rate (numbers don't work well in LMs)
     noise_bin = nearest_bin_noise(
         cfg,
-        soup_rate,
+        soup_ratio,
         cfg.soup_ratio_low_bin,
         cfg.soup_ratio_med_bin,
         cfg.soup_ratio_high_bin,
     )
-    hint_str = f"[noise {noise_bin}] [docs {len(aux)}]"
+    hint_str = f"[noise {noise_bin}]"
 
     if not cfg.save_tokenized:
         return {
@@ -283,20 +288,19 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars})
     ds = ds.map(normalize_clone_clean)
     ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars})
-    ds = ds.shuffle(cfg.seed + 42)
 
     # save to disk to free memory
     ds.save_to_disk(f"{cfg.output_path}.tmp")
     del ds
-    ds = load_from_disk(f"{cfg.output_path}.tmp")
+    ds_main = load_from_disk(f"{cfg.output_path}.tmp")
 
     # we need two streams of auxiliary examples,
     # they are used as the source of noise when adding noise
     # to the proper (main) example
-
-    # make two auxiliary streams
-    unneeded_columns = [col for col in ds.column_names if "text_clean" != col]
-    ds_aux = ds.remove_columns(unneeded_columns)
+    ds_aux = ds_main.shuffle(cfg.seed + 42)
+    # we only need the normalized cleaned text of the auxiliaries
+    unneeded_columns = [col for col in ds_aux.column_names if "text_clean" != col]
+    ds_aux = ds_aux.remove_columns(unneeded_columns)
     ds_aux = ds_aux.rename_column("text_clean", "aux")
 
     # make a copy
@@ -308,15 +312,16 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     ds_aux = concatenate_datasets([ds_aux, ds_aux_other], axis=1)
     # flatten them into one string
     ds_aux = ds_aux.map(
-        lambda x: {"aux": x["aux"] + " " + x["aux_other"]}, remove_columns=["aux_other"]
+        lambda x: {"aux": x["aux"] + " " + x["aux_other"]}
     )
+    ds_aux = ds_aux.remove_columns(["aux_other"])
 
     # shuffle main so that the three (main, aux, aux_other)
     # originate from three independently sampled examples
     ds_aux = ds_aux.shuffle(cfg.seed + 1338)
 
-    # merge main with auxiliaries
-    out_ds = concatenate_datasets([ds_main, ds_aux])
+    # merge aux with the main horizontally
+    out_ds = concatenate_datasets([ds_main, ds_aux], axis=1)
     return out_ds
 
 

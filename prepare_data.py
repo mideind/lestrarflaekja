@@ -133,17 +133,18 @@ def prepare_dataset_word_soup(
     augm_ds = normalize_and_make_auxiliary(cfg, ds)
 
     examples = []
-    for doc, aux in tqdm.tqdm(zip(augm_ds.main, augm_ds.aux), total=len(augm_ds)):
+    for example in augm_ds:
         chunks = chunk_text_by_word_count(
-            doc["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
+            example["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
         )
 
         for chunk in chunks:
             result = transform_example_word_soup(
                 text=chunk,
+                text_clean=example["text_clean"],
                 cfg=cfg,
                 enc=enc,
-                aux=aux["text"],
+                text_aux=example["aux"],
             )
             if result is None:
                 continue
