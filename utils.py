@@ -5,7 +5,7 @@ from typing import Optional, NamedTuple
 import functools
 from pathlib import Path
 
-from datasets import Dataset, concatenate_datasets
+from datasets import Dataset, concatenate_datasets, load_dataset
 from omegaconf import MISSING
 import numpy as np
 from transformers import (
@@ -288,7 +288,7 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     # save to disk so we can clear dangling strings from memory
     ds.save_to_disk(f"{cfg.output_path}.tmp")
     del ds
-    ds = hf_datasets.load_dataset(f"{cfg.output_path}.tmp")
+    ds = load_dataset(f"{cfg.output_path}.tmp")
 
     # we need two streams of auxiliary examples,
     # they are used as the source of noise when adding noise
