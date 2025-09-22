@@ -285,7 +285,7 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars})
     ds = ds.shuffle(cfg.seed + 42)
 
-    # save to disk so we can clear dangling strings from memory
+    # save to disk to free memory
     ds.save_to_disk(f"{cfg.output_path}.tmp")
     del ds
     ds = load_from_disk(f"{cfg.output_path}.tmp")
@@ -295,31 +295,28 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     # to the proper (main) example
 
     # make two auxiliary streams
-    unclean_columns = [col for col in ds.column_names if "text_clean" != col]
-    ds_aux = ds.remove_columns(unclean_columns)
+    unneeded_columns = [col for col in ds.column_names if "text_clean" != col]
+    ds_aux = ds.remove_columns(unneeded_columns)
     ds_aux = ds_aux.rename_column("text_clean", "aux")
-    ds_aux_other = ds_aux.rename_column("aux", "other_aux")
 
-    # make aux and aux_other IID compared to each other
+    # make a copy
+    ds_aux_other = ds_aux.rename_column("aux", "aux_other")
+    # make aux and its copy shuffled relative to each other
     ds_aux = ds_aux.shuffle(cfg.seed + 1337)
+
     # combine them horizontally
     ds_aux = concatenate_datasets([ds_aux, ds_aux_other], axis=1)
+    # flatten them into one string
+    ds_aux = ds_aux.map(
+        lambda x: {"aux": x["aux"] + " " + x["aux_other"]}, remove_columns=["aux_other"]
+    )
 
-    # shuffle main so that (main, aux, aux_other)
-    # are three independently sampled examples
-    ds_main = ds.shuffle(cfg.seed)
-
-    def flatten_auxiliary(example: dict) -> dict:
-        aux = example.pop("aux")
-        other_aux = example.pop("other_aux")
-        aux_str = aux + " " + other_aux
-        return {
-            "text": example["text"],
-            "aux": aux_str,
-        }
+    # shuffle main so that the three (main, aux, aux_other)
+    # originate from three independently sampled examples
+    ds_aux = ds_aux.shuffle(cfg.seed + 1338)
 
     # merge main with auxiliaries
-    out_ds = ds_main.map(flatten_auxiliary)
+    out_ds = concatenate_datasets([ds_main, ds_aux])
     return out_ds
 
 
