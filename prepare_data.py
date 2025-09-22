@@ -56,7 +56,6 @@ python prepare_data.py \
 
 """
 
-
 import logging
 import os
 import sys
@@ -135,7 +134,6 @@ def prepare_dataset_word_soup(
 
     examples = []
     for doc, aux in tqdm.tqdm(zip(augm_ds.main, augm_ds.aux), total=len(augm_ds)):
-
         chunks = chunk_text_by_word_count(
             doc["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
         )
@@ -153,18 +151,20 @@ def prepare_dataset_word_soup(
 
     return examples
 
+
 def prepare_dataset_vanilla(
     cfg: DataConfig, ds: hf_datasets.Dataset, *, enc: AutoTokenizer
 ) -> list[dict]:
     """process vanilla."""
     logger.info("processing dataset with vanilla")
 
-    ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.prefilter_char_count })  # True means keep
+    ds = ds.filter(
+        lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_char_count}
+    )  # True means keep
     ds = ds.map(lambda x: {"text": collapse_multispace(x["text"]).strip()})
 
     examples = []
     for doc in tqdm.tqdm(ds, total=len(ds)):
-
         chunks = chunk_text_by_word_count(
             doc["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
         )
@@ -180,6 +180,7 @@ def prepare_dataset_vanilla(
             examples.append(result)
 
     return examples
+
 
 def prepare_data(cfg: DataConfig) -> None:
     """The fooberino."""
@@ -201,9 +202,9 @@ def prepare_data(cfg: DataConfig) -> None:
     # no subsets to think of
     if not subset_names:
         ds = hf_datasets.load_dataset(cfg.dataset_name, split="train")
-        logger.info(f"loaded dataset: {len(dataset)} examples")
+        logger.info(f"loaded dataset: {len(ds)} examples")
         examples = preprocess_fns[cfg.transform](cfg, ds, enc=enc)
-        logger.info(f"──────────────────────────────")
+        logger.info("──────────────────────────────")
 
     else:
         # we want distractors to be similar to reconstruction target
@@ -211,7 +212,9 @@ def prepare_data(cfg: DataConfig) -> None:
         # instead of combining all into one first
         examples = []
         for name in subset_names:
-            subset_ds = hf_datasets.load_dataset(cfg.dataset_name, name=name, split="train")
+            subset_ds = hf_datasets.load_dataset(
+                cfg.dataset_name, name=name, split="train"
+            )
 
             # subsample by sharding if requested
             if cfg.subshard is not None:
@@ -221,7 +224,7 @@ def prepare_data(cfg: DataConfig) -> None:
 
             subset_examples = preprocess_fns[cfg.transform](cfg, subset_ds, enc=enc)
             logger.info(f"total examples from '{name}': {len(subset_examples)}")
-            logger.info(f"──────────────────────────────")
+            logger.info("──────────────────────────────")
 
             examples.extend(subset_examples)
 

@@ -59,7 +59,7 @@ class DataConfig:
     output_path: Path = MISSING
     output_repoid: Optional[str] = None
     seed: int = 42
-    prefilter_char_count: int = 60
+    coarse_prefilter_char_count: int = 60
 
 
 @dataclass
@@ -99,15 +99,14 @@ def chunk_text_by_word_count(text: str, min_words: int, max_words: int) -> list[
     return text_parts
 
 
-def transform_vanilla(
-    text: str, *, cfg: DataConfig, enc: AutoTokenizer
-) -> dict:
+def transform_vanilla(text: str, *, cfg: DataConfig, enc: AutoTokenizer) -> dict:
     """vanilla."""
 
     task_input = enc(text, add_special_tokens=False)["input_ids"]
     return {
         "input_ids": task_input,
     }
+
 
 def transform_example_word_noise(
     text: str, *, cfg: DataConfig, enc: AutoTokenizer, aux: str
@@ -167,7 +166,11 @@ def transform_example_word_noise(
 
     # hint for the task
     noise_bin = nearest_bin_noise(
-        cfg, scramble_rate, cfg.scramble_low_bin, cfg.scramble_med_bin, cfg.scramble_high_bin
+        cfg,
+        scramble_rate,
+        cfg.scramble_low_bin,
+        cfg.scramble_med_bin,
+        cfg.scramble_high_bin,
     )
     hint_str = f"[noise {noise_bin}]"
 
@@ -231,7 +234,11 @@ def transform_example_word_soup(
 
     # we use one of 3 labels to hint at the noise rate (numbers don't work well in LMs)
     noise_bin = nearest_bin_noise(
-        cfg, soup_rate, cfg.soup_ratio_low_bin, cfg.soup_ratio_med_bin, cfg.soup_ratio_high_bin
+        cfg,
+        soup_rate,
+        cfg.soup_ratio_low_bin,
+        cfg.soup_ratio_med_bin,
+        cfg.soup_ratio_high_bin,
     )
     hint_str = f"[noise {noise_bin}] [docs {len(aux)}]"
 
@@ -264,22 +271,51 @@ class DatasetWithAuxiliary(NamedTuple):
     main: Dataset
     aux: Dataset
 
+
+def normalize_clone_clean(example: dict) -> dict:
+    text = collapse_multispace(example["text"]).strip()
+    text_clean = remove_non_alphanumeric(text).lower()
+    return {"text": text, "text_clean": text_clean}
+
+
+def flatten_auxiliary(example: dict) -> dict:
+    aux = example.pop("aux")
+    other_aux = example.pop("other_aux")
+    aux_str = aux + " " + other_aux
+    return {
+        "text": example["text"],
+        "aux": aux_str,
+    }
+
+
 def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAuxiliary:
-    # drop obviosuly too short examples early
-    ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.prefilter_char_count })  # True means keep
+    # drop obviosuly too short examples early, True means keep example in dataset
+    ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars})
+    ds = ds.map(normalize_clone_clean)
+    ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars})
+    ds = ds.shuffle(cfg.seed + 42)
+    assert False, "fix me"
 
-    ds_main = ds.map(lambda x: {"text": collapse_multispace(x["text"]).strip()})
+    # save to disk so we can clear dangling strings from memory
+    ds.save_to_disk(f"{cfg.output_path}.tmp")
+    del ds
 
-    ds_main_clean = ds_main.map(lambda x: {"text": remove_non_alphanumeric(x["text"]).lower()})
-    ds_clean = ds_main.map(lambda x: {"text": remove_non_alphanumeric(x["text"].lower())})
+    # make two auxiliary streams distributed independently from each other and main
+    unclean_columns = [col for col in ds.column_names if "text_clean" != col]
+    ds_aux = ds.remove_columns(unclean_columns)
+    ds_aux = ds_aux.rename_column("text_clean", "aux")
+    ds_aux_other = ds_aux.rename_column("aux", "other_aux")
 
-    # since these are shuffled, we don't need to shuffle ds_main as well
-    ds_aux1 = ds_clean.shuffle(cfg.seed).rename_column("text", "text1")
-    ds_aux2 = ds_aux1.shuffle(cfg.seed).rename_column("text1", "text2")
-    # merge and flatten adjacent examples
-    ds_aux = concatenate_datasets([ds_aux1, ds_aux2], axis=1)
-    ds_aux = ds_aux.map(lambda x: {"text": x["text1"] + " " + x["text2"]})
-    return DatasetWithAuxiliary(ds_main, ds_aux) 
+    # combine horizontally
+    ds_aux = ds_aux.shuffle(cfg.seed + 1337)
+    ds_aux = concatenate_datasets([ds_aux, ds_aux_other], axis=1)
+
+    # with this shuffle, they are now independently distributed from each other
+    ds_main = ds.shuffle(cfg.seed)
+
+    # merge main with auxiliaries
+    out_ds = ds_main.map(flatten_auxiliary)
+    return out_ds
 
 
 def encode_word_noise_task(cfg: TrainConfig, example: dict, enc: AutoTokenizer) -> dict:
@@ -301,12 +337,14 @@ def encode_word_soup_task(cfg: TrainConfig, example: dict, enc: AutoTokenizer) -
     """Tokenize word soup task."""
     input_parts = [example["hint"], cfg.delimiter] if "hint" in example else []
 
-    input_parts.extend([
-        example["prefix"],
-        cfg.delimiter,
-        example["word_soup"],
-        cfg.delimiter,
-    ])
+    input_parts.extend(
+        [
+            example["prefix"],
+            cfg.delimiter,
+            example["word_soup"],
+            cfg.delimiter,
+        ]
+    )
     task_input = " ".join(input_parts)
 
     task_input = enc(task_input, add_special_tokens=False)["input_ids"]

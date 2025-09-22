@@ -95,14 +95,22 @@ class TruncatedLossTrainer(Trainer):
 
         nonzero_weight_mask = weights.ge(0)
         is_input_and_not_padding = labels.neq(-100)
-        loss_contribution_mask = nonzero_weight_mask.logical_and(is_input_and_not_padding)
+        loss_contribution_mask = nonzero_weight_mask.logical_and(
+            is_input_and_not_padding
+        )
 
         flat_logits = logits[loss_contribution_mask]
         flat_labels = labels[loss_contribution_mask]
 
-        loss = torch.nn.functional.cross_entropy(flat_logits, flat_labels, reduction="mean")
+        loss = torch.nn.functional.cross_entropy(
+            flat_logits, flat_labels, reduction="mean"
+        )
 
-        nparams = sum(param.numel() for _, param in model.named_parameters() if param.requires_grad)
+        nparams = sum(
+            param.numel()
+            for _, param in model.named_parameters()
+            if param.requires_grad
+        )
         logger.info(f"Number of trainable parameters: {nparams}")
 
         ##########
@@ -150,11 +158,13 @@ def fooberino(cfg: TrainConfig) -> None:
     raw_dataset = hf_datasets.load_dataset(cfg.dataset_name)
 
     # sample 100 datapoints from the dataset
-    small_text_ds = hf_datasets.DatasetDict({
-        "train": raw_dataset["train"].shuffle(seed=42).select(range(1000)),
-        "validation": raw_dataset["validation"].shuffle(seed=42).select(range(100)),
-        "test": raw_dataset["test"].shuffle(seed=42).select(range(100)),
-    })
+    small_text_ds = hf_datasets.DatasetDict(
+        {
+            "train": raw_dataset["train"].shuffle(seed=42).select(range(1000)),
+            "validation": raw_dataset["validation"].shuffle(seed=42).select(range(100)),
+            "test": raw_dataset["test"].shuffle(seed=42).select(range(100)),
+        }
+    )
 
     # load model from huggingface
     logger.info(f"Loading model: {cfg.model_name}")

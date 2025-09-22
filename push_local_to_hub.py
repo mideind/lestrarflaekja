@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from enum import StrEnum
 import re
@@ -9,6 +8,7 @@ from pathlib import Path
 from datasets import Dataset, concatenate_datasets, load_dataset, load_from_disk
 from omegaconf import MISSING, OmegaConf
 from icecream import ic
+
 
 @dataclass
 class PushLocalConfig:
