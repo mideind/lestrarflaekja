@@ -278,40 +278,45 @@ def normalize_clone_clean(example: dict) -> dict:
     return {"text": text, "text_clean": text_clean}
 
 
-def flatten_auxiliary(example: dict) -> dict:
-    aux = example.pop("aux")
-    other_aux = example.pop("other_aux")
-    aux_str = aux + " " + other_aux
-    return {
-        "text": example["text"],
-        "aux": aux_str,
-    }
-
-
 def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAuxiliary:
-    # drop obviosuly too short examples early, True means keep example in dataset
+    # drop obviosuly too short examples early (True means keep example in dataset)
     ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars})
     ds = ds.map(normalize_clone_clean)
     ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars})
     ds = ds.shuffle(cfg.seed + 42)
-    assert False, "fix me"
 
     # save to disk so we can clear dangling strings from memory
     ds.save_to_disk(f"{cfg.output_path}.tmp")
     del ds
+    ds = hf_datasets.load_dataset(f"{cfg.output_path}.tmp")
 
-    # make two auxiliary streams distributed independently from each other and main
+    # we need two streams of auxiliary examples,
+    # they are used as the source of noise when adding noise
+    # to the proper (main) example
+
+    # make two auxiliary streams
     unclean_columns = [col for col in ds.column_names if "text_clean" != col]
     ds_aux = ds.remove_columns(unclean_columns)
     ds_aux = ds_aux.rename_column("text_clean", "aux")
     ds_aux_other = ds_aux.rename_column("aux", "other_aux")
 
-    # combine horizontally
+    # make aux and aux_other IID compared to each other
     ds_aux = ds_aux.shuffle(cfg.seed + 1337)
+    # combine them horizontally
     ds_aux = concatenate_datasets([ds_aux, ds_aux_other], axis=1)
 
-    # with this shuffle, they are now independently distributed from each other
+    # shuffle main so that (main, aux, aux_other)
+    # are three independently sampled examples
     ds_main = ds.shuffle(cfg.seed)
+
+    def flatten_auxiliary(example: dict) -> dict:
+        aux = example.pop("aux")
+        other_aux = example.pop("other_aux")
+        aux_str = aux + " " + other_aux
+        return {
+            "text": example["text"],
+            "aux": aux_str,
+        }
 
     # merge main with auxiliaries
     out_ds = ds_main.map(flatten_auxiliary)
