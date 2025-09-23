@@ -56,6 +56,7 @@ python prepare_data.py \
 
 """
 
+import random
 import logging
 import os
 import sys
@@ -232,6 +233,7 @@ def prepare_data(cfg: DataConfig) -> None:
     logger.info(f"total examples: {len(examples)}")
     logger.info(f"saving dataset to: {cfg.output_path}")
 
+    random.shuffle(examples)
     out_ds = hf_datasets.Dataset.from_list(examples)
     out_ds.save_to_disk(str(cfg.output_path))
 

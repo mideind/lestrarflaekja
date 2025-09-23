@@ -195,7 +195,7 @@ def transform_example_word_noise(
 
 
 def transform_example_word_soup(
-        text: str, *, text_clean, text_aux: str, cfg: DataConfig, enc: AutoTokenizer
+    text: str, *, text_clean, text_aux: str, cfg: DataConfig, enc: AutoTokenizer
 ) -> dict:
     """Transform example with word soup."""
     src_words = set(text_clean.split())
@@ -207,7 +207,9 @@ def transform_example_word_soup(
     distractors = set(text_aux.split())
     distractors = [word for word in distractors if word in src_words]
     should_keep = np.random.uniform(0, 1, size=len(distractors)) < cfg.soup_keep_rate
-    kept_distractors = set([word for (word, keep) in zip(distractors, should_keep) if keep])
+    kept_distractors = set(
+        [word for (word, keep) in zip(distractors, should_keep) if keep]
+    )
 
     # convert to list and shuffle
     kept_distractors = list(kept_distractors)
@@ -311,9 +313,7 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     # combine them horizontally
     ds_aux = concatenate_datasets([ds_aux, ds_aux_other], axis=1)
     # flatten them into one string
-    ds_aux = ds_aux.map(
-        lambda x: {"aux": x["aux"] + " " + x["aux_other"]}
-    )
+    ds_aux = ds_aux.map(lambda x: {"aux": x["aux"] + " " + x["aux_other"]})
     ds_aux = ds_aux.remove_columns(["aux_other"])
 
     # shuffle main so that the three (main, aux, aux_other)
