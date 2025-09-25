@@ -60,6 +60,7 @@ class DataConfig:
     output_repoid: Optional[str] = None
     seed: int = 42
     coarse_prefilter_min_chars: int = 60
+    overwrite: bool = False
 
 
 @dataclass
@@ -109,7 +110,7 @@ def transform_vanilla(text: str, *, cfg: DataConfig, enc: AutoTokenizer) -> dict
 
 
 def transform_example_word_noise(
-    text: str, *, cfg: DataConfig, enc: AutoTokenizer, aux: str
+    text: str, *, text_clean, text_aux: str, cfg: DataConfig, enc: AutoTokenizer
 ) -> dict:
     """Transform example with word noise.
 
@@ -119,50 +120,53 @@ def transform_example_word_noise(
     - insert
     - shuffle
 
-    The aux text is expected to be a cleaned version of the auxiliary text (no punctuation).
+    The 'text_aux' is expected to be a cleaned version of the auxiliary text (no punctuation).
 
     Assuming default hyperparameters:
     - The number of BPE tokens in the input_ids is approximately 2.2x the number of BPE tokens in the original text.
     - Alternatively, the number of BPE tokens is between 3x and 4x the number of words in the original text.
     """
     # split into wordlike tokens
-    words = text.split()
-    if len(words) < cfg.min_words_main:
+    src_words = text.split()
+    if len(src_words) < cfg.min_words_main:
         return None
 
+    # select the noise rate
     scramble_rate = np.random.uniform(cfg.scramble_low_bin, cfg.scramble_high_bin)
     # 1. sample which tokens will be deleted
-    should_delete = np.random.uniform(0, 1, size=len(words)) < scramble_rate
+    should_delete = np.random.uniform(0, 1, size=len(src_words)) < scramble_rate
     should_keep = np.logical_not(should_delete)
-    words = [word for word, keep in zip(words, should_keep) if keep]
+    src_words = [word for word, keep in zip(src_words, should_keep) if keep]
 
     # 2. sample will be masked
-    should_mask = np.random.uniform(0, 1, size=len(words)) < scramble_rate
-    words = [cfg.mask_token if mask else word for word, mask in zip(words, should_mask)]
+    should_mask = np.random.uniform(0, 1, size=len(src_words)) < scramble_rate
+    src_words = [
+        cfg.mask_token if mask else word for word, mask in zip(src_words, should_mask)
+    ]
 
     # 3. sample the location of the inserted tokens
-    should_insert = np.random.uniform(0, 1, size=len(words)) < scramble_rate
-    aux_words = aux.split()
-    # determine which words will be inserted
-    perm = np.random.permutation(len(words)) % len(aux_words)
-    # splice the words with randomly selected aux words
+    should_insert = np.random.uniform(0, 1, size=len(src_words)) < scramble_rate
+    aux_words = text_aux.split()
+    # determine which src_words will be inserted
+    perm = np.random.permutation(len(src_words)) % len(aux_words)
+    # splice the src_words with randomly selected text_aux src_words
     spliced = []
-    for i, (word, insert) in enumerate(zip(words, should_insert)):
+    for i, (word, insert) in enumerate(zip(src_words, should_insert)):
         try:
             if insert:
                 spliced.append(aux_words[perm[i]])
         except Exception as e:
             breakpoint()
         spliced.append(word)
-    words = spliced
+    src_words = spliced
 
     # 4. sample new location after position of noise
-    position_before_noise = np.arange(len(words), dtype=np.float32)
-    position_noise = np.random.uniform(0, cfg.permutation_distance, size=len(words))
+    position_before_noise = np.arange(len(src_words), dtype=np.float32)
+    position_noise = np.random.uniform(0, cfg.permutation_distance, size=len(src_words))
     position_after_noise = position_before_noise + position_noise
 
-    words = [words[i] for i in np.argsort(position_after_noise)]
-    scramble = " ".join(words)
+    src_words = [src_words[i] for i in np.argsort(position_after_noise)]
+    scramble = " ".join(src_words)
 
     # hint for the task
     noise_bin = nearest_bin_noise(

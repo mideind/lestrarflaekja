@@ -63,6 +63,8 @@ import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Optional
+import subprocess
+from pathlib import Path
 
 import datasets as hf_datasets
 from datasets import concatenate_datasets
@@ -98,24 +100,25 @@ def prepare_dataset_word_noise(
     cfg: DataConfig, ds: hf_datasets.Dataset, *, enc: AutoTokenizer
 ) -> list[dict]:
     """process word noise."""
-    logger.info("processing dataset with word noise")
+    logger.info("processing dataset for 'word-noise' task")
 
     augm_ds = normalize_and_make_auxiliary(cfg, ds)
 
     examples = []
-    for doc, aux in tqdm.tqdm(zip(augm_ds.main, augm_ds.aux), total=len(augm_ds)):
+    for example in augm_ds:
         # make sure the document is not too short and not too long by partitioning
         chunks = chunk_text_by_word_count(
-            doc["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
+            example["text"], min_words=cfg.min_words_main, max_words=cfg.max_words_main
         )
 
         # we reuse the same aux document for examples derived from same primary document
         for chunk in chunks:
             result = transform_example_word_noise(
                 text=chunk,
+                text_clean=example["text_clean"],
                 cfg=cfg,
                 enc=enc,
-                aux=aux["text"],
+                text_aux=example["aux"],
             )
 
             if result is None:
@@ -129,7 +132,7 @@ def prepare_dataset_word_soup(
     cfg: DataConfig, ds: hf_datasets.Dataset, *, enc: AutoTokenizer
 ) -> list[dict]:
     """process word soup."""
-    logger.info("processing dataset with word soup")
+    logger.info("processing dataset for 'word-soup' task")
 
     augm_ds = normalize_and_make_auxiliary(cfg, ds)
 
@@ -158,7 +161,7 @@ def prepare_dataset_vanilla(
     cfg: DataConfig, ds: hf_datasets.Dataset, *, enc: AutoTokenizer
 ) -> list[dict]:
     """process vanilla."""
-    logger.info("processing dataset with vanilla")
+    logger.info("processing dataset for 'vanilla' task")
 
     ds = ds.filter(
         lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars}
@@ -197,51 +200,117 @@ def prepare_data(cfg: DataConfig) -> None:
         Transform.vanilla: prepare_dataset_vanilla,
     }
 
+    """
+    if output_dir exists:
+      end
+
+    make output_dir
+
+    for subset_idx and subset in subsets:
+      out_subset ← process subset
+      out_subset ← make train/test split in out_subset
+      # save to disk
+      ./output_dir/idx ← out_subset
+      delete out_subset
+
+    new_subsets ← list
+    for subset_idx in subsets:
+      new_subsets[idx] ← load subset_idx from disk
+
+    epoch = concatenate new_subsets
+
+    push epoch to hub
+      
+    """
     subset_names = [] if cfg.subset_names is None else cfg.subset_names.split(",")
     if subset_names:
         logger.info(f"dataset subset_names: {subset_names}")
 
-    # no subsets to think of
+    # no subsets ("configurations") to think of
     if not subset_names:
-        ds = hf_datasets.load_dataset(cfg.dataset_name, split="train")
-        logger.info(f"loaded dataset: {len(ds)} examples")
-        examples = preprocess_fns[cfg.transform](cfg, ds, enc=enc)
-        logger.info("──────────────────────────────")
+        # ds = hf_datasets.load_dataset(cfg.dataset_name, split="train")
+        ds_dict = hf_datasets.load_dataset(cfg.dataset_name)
+        out_splits = {}
+        for split_name in ds_dict:
+            ds = ds_dict[split_name]
+            logger.info(f"loaded dataset: {len(ds)} examples")
+            examples = preprocess_fns[cfg.transform](cfg, ds, enc=enc)
+            out_splits[split_name] = hf_datasets.Dataset.from_list(examples)
+        merged_ds = hf_datasets.DatasetDict(out_splits)
+        merged_ds.save_to_disk(str(cfg.output_path))
 
     else:
-        # we want distractors to be similar to reconstruction target
-        # therefore each subset has to be handled individually
-        # instead of combining all into one first
-        examples = []
-        for name in subset_names:
-            subset_ds = hf_datasets.load_dataset(
-                cfg.dataset_name, name=name, split="train"
-            )
+        # clear any old files if necessary and applicable
+        if cfg.output_path.exists() and not cfg.overwrite:
+            raise ValueError("Dataset already exists at '{cfg.output_path}'")
+        if cfg.output_path.exists():
+            _ret_code = subprocess.run(["rm", "-r", str(cfg.output_path)])
+        tmpdir = Path(str(cfg.output_path) + ".tmp")
+        if tmpdir.exists():
+            _ret_code = subprocess.run(["rm", "-r", tmpdir])
+
+        # make sure our stuff exists
+        cfg.output_path.mkdir(exist_ok=True, parents=True)
+        tmpdir.mkdir(exist_ok=True, parents=True)
+
+        for subset_idx, subset_name in enumerate(subset_names):
+            s_ds = hf_datasets.load_dataset(cfg.dataset_name, name=subset_name)
+            ds_train = s_ds.pop("train")
+            ds_valid = s_ds.pop("test")
+
+            logger.info(f"loaded subset '{subset_name}': {len(ds_train)} examples")
 
             # subsample by sharding if requested
             if cfg.subshard is not None:
-                subset_ds = subset_ds.shard(cfg.subshard, 0)
+                ds_train = ds_train.shard(cfg.subshard, 0)
+                logger.info(f"sharded '{subset_name}' to: {len(ds_train)} examples")
 
-            logger.info(f"loaded subset '{name}': {len(subset_ds)} examples")
+            examples_train = preprocess_fns[cfg.transform](cfg, ds_train, enc=enc)
+            examples_valid = preprocess_fns[cfg.transform](cfg, ds_valid, enc=enc)
+            logger.info(
+                f"output examples '{subset_name}': (train {len(examples_train):_d}) (valid {len(examples_valid):_d}) "
+            )
 
-            subset_examples = preprocess_fns[cfg.transform](cfg, subset_ds, enc=enc)
-            logger.info(f"total examples from '{name}': {len(subset_examples)}")
-            logger.info("──────────────────────────────")
+            out_ds = hf_datasets.DatasetDict(
+                {
+                    "train": hf_datasets.Dataset.from_list(examples_train),
+                    "valid": hf_datasets.Dataset.from_list(examples_valid),
+                }
+            )
+            # path_to_idx = cfg.output_path / f"subset.{subset_idx}"
+            path_to_idx = tmpdir / f"subset.{subset_idx}"
+            out_ds.save_to_disk(str(path_to_idx))
+            del s_ds, ds_train, ds_valid, out_ds
 
-            examples.extend(subset_examples)
+        # load them all from disk and concatenate
+        saved_datasets = []
+        for subset_idx, subset_name in enumerate(subset_names):
+            path_to_idx = tmpdir / f"subset.{subset_idx}"
+            saved_ds = hf_datasets.load_from_disk(path_to_idx)
+            saved_datasets.append(saved_ds)
 
-    logger.info(f"total examples: {len(examples)}")
-    logger.info(f"saving dataset to: {cfg.output_path}")
+        merged_ds = hf_datasets.DatasetDict(
+            {
+                "train": hf_datasets.concatenate_datasets(
+                    [s["train"] for s in saved_datasets]
+                ),
+                "valid": hf_datasets.concatenate_datasets(
+                    [s["valid"] for s in saved_datasets]
+                ),
+            }
+        )
+        merged_ds.save_to_disk(cfg.output_path)
+        ntrain, nvalid = len(merged_ds["train"]), len(merged_ds["valid"])
+        logger.info(
+            f"Saved to '{cfg.output_path}': (train {ntrain:_d}) (valid {nvalid:_d}) examples"
+        )
 
-    random.shuffle(examples)
-    out_ds = hf_datasets.Dataset.from_list(examples)
-    out_ds.save_to_disk(str(cfg.output_path))
+        # clear the tmpdir
+        _ret_code = subprocess.run(["rm", "-r", tmpdir])
 
     if cfg.output_repoid is not None:
         logger.info(f"pushing to huggingface hub: '{cfg.output_repoid}'")
         out_ds.push_to_hub(cfg.output_repoid)
-
-    return out_ds
 
 
 def main() -> None:
