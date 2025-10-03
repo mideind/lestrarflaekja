@@ -104,9 +104,7 @@ def transform_vanilla(text: str, *, cfg: DataConfig, enc: AutoTokenizer) -> dict
     """vanilla."""
 
     task_input = enc(text, add_special_tokens=False)["input_ids"]
-    return {
-        "input_ids": task_input,
-    }
+    return {"input_ids": task_input, "weights": [1] * len(task_input)}
 
 
 def transform_example_word_noise(
@@ -289,11 +287,23 @@ def normalize_clone_clean(example: dict) -> dict:
     return {"text": text, "text_clean": text_clean}
 
 
+def coarse_filter(x, *, min_chars):
+    return len(x["text"]) > min_chars
+
+
+def merge_auxes_in_example(x):
+    aux_other = x.pop("aux_other")
+    aux = x.pop("aux")
+    x["aux"] = aux + " " + aux_other
+    return x
+
+
 def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAuxiliary:
     # drop obviosuly too short examples early (True means keep example in dataset)
-    ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars})
+    filter_fn_kwargs = {"min_chars": cfg.coarse_prefilter_min_chars}
+    ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
     ds = ds.map(normalize_clone_clean)
-    ds = ds.filter(lambda x: {"text": len(x["text"]) > cfg.coarse_prefilter_min_chars})
+    ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
 
     # save to disk to free memory
     ds.save_to_disk(f"{cfg.output_path}.tmp")
@@ -317,8 +327,7 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     # combine them horizontally
     ds_aux = concatenate_datasets([ds_aux, ds_aux_other], axis=1)
     # flatten them into one string
-    ds_aux = ds_aux.map(lambda x: {"aux": x["aux"] + " " + x["aux_other"]})
-    ds_aux = ds_aux.remove_columns(["aux_other"])
+    ds_aux = ds_aux.map(merge_auxes_in_example)
 
     # shuffle main so that the three (main, aux, aux_other)
     # originate from three independently sampled examples
@@ -331,8 +340,11 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
 
 def encode_word_noise_task(cfg: TrainConfig, example: dict, enc: AutoTokenizer) -> dict:
     """Tokenize word noise task."""
-    input_parts = [example["hint"], cfg.delimiter] if cfg.use_hint else []
-    input_parts.extend([example["scramble"], cfg.delimiter])
+
+    input_parts = [example["hint"], cfg.delimiter, example["scramble"], cfg.delimiter]
+    if not cfg.use_hint:
+        input_parts = [cfg.delimiter, example["scramble"], cfg.delimiter]
+
     task_input = " ".join(input_parts)
 
     task_input = enc(task_input, add_special_tokens=False)["input_ids"]
@@ -346,16 +358,21 @@ def encode_word_noise_task(cfg: TrainConfig, example: dict, enc: AutoTokenizer) 
 
 def encode_word_soup_task(cfg: TrainConfig, example: dict, enc: AutoTokenizer) -> dict:
     """Tokenize word soup task."""
-    input_parts = [example["hint"], cfg.delimiter] if "hint" in example else []
-
-    input_parts.extend(
-        [
+    input_parts = [
+        example["hint"],
+        example["prefix"],
+        cfg.delimiter,
+        example["word_soup"],
+        cfg.delimiter,
+    ]
+    if "hint" not in example:
+        input_parts = [
             example["prefix"],
             cfg.delimiter,
             example["word_soup"],
             cfg.delimiter,
         ]
-    )
+
     task_input = " ".join(input_parts)
 
     task_input = enc(task_input, add_special_tokens=False)["input_ids"]
