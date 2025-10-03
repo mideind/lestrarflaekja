@@ -332,7 +332,9 @@ def prepare_data(cfg: DataConfig) -> None:
 
                 logger.info(f"loaded subset '{subset_name}': {len(ds_train)} examples")
 
-                cfg.seed = _seed + abs(hash(cfg.dataset_name + subset_name + str(subset_idx)))
+                cfg.seed = _seed + abs(
+                    hash(cfg.dataset_name + subset_name + str(subset_idx))
+                )
                 # subsample by sharding if requested
                 if cfg.subshard is not None:
                     ds_train = ds_train.shard(cfg.subshard, 0)
