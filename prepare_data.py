@@ -315,7 +315,7 @@ def prepare_data(cfg: DataConfig) -> None:
     else:
         # clear any old files if necessary and applicable
         if cfg.output_path.exists() and not cfg.overwrite:
-            logger.info("Dataset already exists at '{cfg.output_path}'")
+            logger.info(f"Dataset already exists at '{cfg.output_path}'")
             sys.exit(0)
         if cfg.output_path.exists():
             _ret_code = subprocess.run(["rm", "-r", str(cfg.output_path)])
