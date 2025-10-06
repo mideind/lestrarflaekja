@@ -303,9 +303,10 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     path_cached = Path(f"{cfg.output_path}.tmp")
 
     filter_fn_kwargs = {"min_chars": cfg.coarse_prefilter_min_chars}
-    ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
-    ds = ds.map(normalize_clone_clean)
-    ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
+    num_proc = 16 if len(ds) > 10000 else (8 if len(ds) > 1000 else 4)
+    ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs, num_proc=num_proc)
+    ds = ds.map(normalize_clone_clean, num_proc=num_proc)
+    ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs, num_proc=num_proc)
 
     # we need two streams of auxiliary examples,
     # they are used as the source of noise when adding noise
