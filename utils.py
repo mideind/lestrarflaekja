@@ -302,18 +302,6 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     # drop obviously too short examples early (True means keep example in dataset)
     path_cached = Path(f"{cfg.output_path}.tmp")
 
-    # if path_cached.exists():
-    #     ds_main = load_from_disk(str(path_cached))
-    # else:
-    #     filter_fn_kwargs = {"min_chars": cfg.coarse_prefilter_min_chars}
-    #     ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
-    #     ds = ds.map(normalize_clone_clean)
-    #     ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
-    #     # save to disk to free memory
-    #     ds.save_to_disk(f"{cfg.output_path}.tmp")
-    #     del ds
-    # ds_main = load_from_disk(f"{cfg.output_path}.tmp")
-
     filter_fn_kwargs = {"min_chars": cfg.coarse_prefilter_min_chars}
     ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
     ds = ds.map(normalize_clone_clean)
@@ -322,7 +310,7 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     # we need two streams of auxiliary examples,
     # they are used as the source of noise when adding noise
     # to the proper (main) example
-    ds_aux = ds_main.shuffle(cfg.seed + 42)
+    ds_aux = ds.shuffle(cfg.seed + 42)
     # we only need the normalized cleaned text of the auxiliaries
     unneeded_columns = [col for col in ds_aux.column_names if "text_clean" != col]
     ds_aux = ds_aux.remove_columns(unneeded_columns)
