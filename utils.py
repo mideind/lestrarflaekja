@@ -301,18 +301,23 @@ def merge_auxes_in_example(x):
 def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAuxiliary:
     # drop obviously too short examples early (True means keep example in dataset)
     path_cached = Path(f"{cfg.output_path}.tmp")
-    if path_cached.exists():
-        ds_main = load_from_disk(str(path_cached))
-    else:
-        filter_fn_kwargs = {"min_chars": cfg.coarse_prefilter_min_chars}
-        ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
-        ds = ds.map(normalize_clone_clean)
-        ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
 
-        # # save to disk to free memory
-        ds.save_to_disk(f"{cfg.output_path}.tmp")
-        del ds
-    ds_main = load_from_disk(f"{cfg.output_path}.tmp")
+    # if path_cached.exists():
+    #     ds_main = load_from_disk(str(path_cached))
+    # else:
+    #     filter_fn_kwargs = {"min_chars": cfg.coarse_prefilter_min_chars}
+    #     ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
+    #     ds = ds.map(normalize_clone_clean)
+    #     ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
+    #     # save to disk to free memory
+    #     ds.save_to_disk(f"{cfg.output_path}.tmp")
+    #     del ds
+    # ds_main = load_from_disk(f"{cfg.output_path}.tmp")
+
+    filter_fn_kwargs = {"min_chars": cfg.coarse_prefilter_min_chars}
+    ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
+    ds = ds.map(normalize_clone_clean)
+    ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs)
 
     # we need two streams of auxiliary examples,
     # they are used as the source of noise when adding noise
