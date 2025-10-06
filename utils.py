@@ -331,7 +331,7 @@ def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAux
     ds_aux = ds_aux.shuffle(cfg.seed + 1338)
 
     # merge aux with the main horizontally
-    out_ds = concatenate_datasets([ds_main, ds_aux], axis=1)
+    out_ds = concatenate_datasets([ds, ds_aux], axis=1)
     return out_ds
 
 
