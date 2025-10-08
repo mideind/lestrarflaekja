@@ -21,7 +21,7 @@ make small scramble:
 
     python prepare_data.py output_path=data/isl_debug.scramble subshard=1000 transform=scramble dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi output_path=data/isl_debug.scramble output_repoid=mideind/scramble.debug
 
-    python prepare_data.py output_path=data/isl_debug.soup subshard=1000 transform=soup dataset_name=mideind/is_prototyping_corpus subset_names=hugi output_path=data/isl_debug.soup
+    python prepare_data.py output_path=data/debug.soup subshard=1000 transform=soup dataset_name=mideind/is_prototyping_corpus subset_names=rafbokavefurinn overwrite=1
 
     python prepare_data.py output_path=data/isl_debug.vanilla subshard=1000 transform=vanilla dataset_name=mideind/is_prototyping_corpus subset_names=mim,hugi output_path=data/isl_debug.vanilla output_repoid=mideind/vanilla.debug
 
@@ -161,24 +161,16 @@ def mappable_transform_soup(batch, *, cfg, enc):
         text_clean = list_text[i]
         aux = list_aux[i]
 
-        for chunk in chunk_text_by_word_count(
-            text,
-            min_words=cfg.min_words_main,
-            max_words=cfg.max_words_main,
-        ):
-            if chunk is None:
-                continue
+        obj = transform_example_word_soup(
+            text=text,
+            text_clean=text_clean,
+            cfg=cfg,
+            enc=enc,
+            text_aux=aux,
+        )
 
-            obj = transform_example_word_soup(
-                text=chunk,
-                text_clean=text_clean,
-                cfg=cfg,
-                enc=enc,
-                text_aux=aux,
-            )
-
-            batch["input_ids"].append(obj["input_ids"])
-            batch["weights"].append(obj["weights"])
+        batch["input_ids"].append(obj["input_ids"])
+        batch["weights"].append(obj["weights"])
 
     return batch
 
@@ -194,7 +186,7 @@ def prepare_dataset_word_noise(
         "enc": enc,
         "cfg": cfg,
     }
-    num_proc = 16 if len(ds) > 10000 else (8 if len(ds) > 1000 else 4)
+    num_proc = 8 if len(ds) > 10000 else 4
     ds = augm_ds.map(
         mappable_transform_word_noise,
         batched=True,
@@ -217,7 +209,8 @@ def prepare_dataset_word_soup(
         "enc": enc,
         "cfg": cfg,
     }
-    num_proc = 8 if len(augm_ds) > 1000 else 4
+    # num_proc = 8 if len(augm_ds) > 1000 else 4
+    num_proc = 1  # FIXME
     ds = augm_ds.map(
         mappable_transform_soup,
         batched=True,

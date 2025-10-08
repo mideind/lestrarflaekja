@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 import re
-from typing import Optional, NamedTuple
+from typing import Optional, NamedTuple, Any
 import functools
 from pathlib import Path
 
@@ -98,6 +98,30 @@ def chunk_text_by_word_count(text: str, min_words: int, max_words: int) -> list[
         text_parts.pop(-1)
     text_parts = [" ".join(part) for part in text_parts]
     return text_parts
+
+
+def _chunk_text_by_word_count_batched(batch: dict[str, list[Any]], *, cfg):
+    # batch is a dict of lists
+    # expected keys: ['text']
+
+    texts = batch.pop("text")
+    other_keys = list(batch.keys())
+    for key in other_keys:
+        batch.pop(key)
+
+    batch["text"] = [
+        chunk
+        for text in texts
+        for chunk in chunk_text_by_word_count(
+            text,
+            min_words=cfg.min_words_main,
+            max_words=cfg.max_words_main,
+        )
+        if cfg.coarse_prefilter_min_chars < len(chunk)
+        and cfg.min_words_main < chunk.count(" ")
+    ]
+
+    return batch
 
 
 def transform_vanilla(text: str, *, cfg: DataConfig, enc: AutoTokenizer) -> dict:
@@ -281,58 +305,71 @@ class DatasetWithAuxiliary(NamedTuple):
     aux: Dataset
 
 
-def normalize_clone_clean(example: dict) -> dict:
-    text = collapse_multispace(example["text"]).strip()
-    text_clean = remove_non_alphanumeric(text).lower()
-    return {"text": text, "text_clean": text_clean}
+def _clone_text_and_clean_batched(batch: dict, *, cfg) -> dict:
+    texts = batch.pop("text")
+    for key in list(batch.keys()):
+        batch.pop(key)
+
+    batch["text"] = []
+    batch["text_clean"] = []
+    for text in texts:
+        if len(text) < cfg.coarse_prefilter_min_chars:
+            continue
+
+        text = collapse_multispace(text).strip()
+        text_clean = remove_non_alphanumeric(text.lower())
+
+        batch["text"].append(text)
+        batch["text_clean"].append(text_clean)
+
+    return batch
 
 
-def coarse_filter(x, *, min_chars):
-    return len(x["text"]) > min_chars
-
-
-def merge_auxes_in_example(x):
-    aux_other = x.pop("aux_other")
-    aux = x.pop("aux")
-    x["aux"] = aux + " " + aux_other
-    return x
+def _make_aux_from_clean_batched(batch: dict[str, list[Any]]):
+    texts_clean = batch.pop("text_clean")
+    texts_clean_other = batch.pop("text_clean_other")
+    batch["aux"] = []
+    for clean, clean_other in zip(texts_clean, texts_clean_other):
+        batch["aux"].append(clean + " " + clean_other)
+    return batch
 
 
 def normalize_and_make_auxiliary(cfg: DataConfig, ds: Dataset) -> DatasetWithAuxiliary:
     # drop obviously too short examples early (True means keep example in dataset)
     path_cached = Path(f"{cfg.output_path}.tmp")
 
-    filter_fn_kwargs = {"min_chars": cfg.coarse_prefilter_min_chars}
-    num_proc = 16 if len(ds) > 10000 else (8 if len(ds) > 1000 else 4)
-    ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs, num_proc=num_proc)
-    ds = ds.map(normalize_clone_clean, num_proc=num_proc)
-    ds = ds.filter(coarse_filter, fn_kwargs=filter_fn_kwargs, num_proc=num_proc)
+    cfg_fn_kwargs = {"cfg": cfg}
+    # num_proc = 8 if len(ds) > 10000 else 4
+    num_proc = 1  # FIXME
+    ds = ds.map(
+        _chunk_text_by_word_count_batched,
+        batched=True,
+        batch_size=32,
+        num_proc=num_proc,
+        fn_kwargs=cfg_fn_kwargs,
+    )
+    ds = ds.map(
+        _clone_text_and_clean_batched,
+        num_proc=num_proc,
+        fn_kwargs=cfg_fn_kwargs,
+        batched=True,
+    )
+    ds = ds.shuffle(cfg.seed + 1)
 
-    # we need two streams of auxiliary examples,
-    # they are used as the source of noise when adding noise
-    # to the proper (main) example
-    ds_aux = ds.shuffle(cfg.seed + 42)
-    # we only need the normalized cleaned text of the auxiliaries
-    unneeded_columns = [col for col in ds_aux.column_names if "text_clean" != col]
-    ds_aux = ds_aux.remove_columns(unneeded_columns)
-    ds_aux = ds_aux.rename_column("text_clean", "aux")
+    ds_clean_only = ds.remove_columns(
+        [c for c in ds.column_names if "text_clean" not in c]
+    )
+    ds_clean_only = ds_clean_only.shuffle(cfg.seed + 43)
+    ds_clean_only_01 = ds_clean_only.shuffle(cfg.seed + 44)
+    ds_clean_only_02 = ds_clean_only.rename_column("text_clean", "text_clean_other")
 
-    # make a copy
-    ds_aux_other = ds_aux.rename_column("aux", "aux_other")
-    # make aux and its copy shuffled relative to each other
-    ds_aux = ds_aux.shuffle(cfg.seed + 1337)
+    ds_clean_only = concatenate_datasets([ds_clean_only_01, ds_clean_only_02], axis=1)
+    ds_clean_only = ds_clean_only.map(
+        _make_aux_from_clean_batched, batched=True, batch_size=32, num_proc=num_proc
+    )
 
-    # combine them horizontally
-    ds_aux = concatenate_datasets([ds_aux, ds_aux_other], axis=1)
-    # flatten them into one string
-    ds_aux = ds_aux.map(merge_auxes_in_example)
-
-    # shuffle main so that the three (main, aux, aux_other)
-    # originate from three independently sampled examples
-    ds_aux = ds_aux.shuffle(cfg.seed + 1338)
-
-    # merge aux with the main horizontally
-    out_ds = concatenate_datasets([ds, ds_aux], axis=1)
+    del ds_clean_only_01, ds_clean_only_02
+    out_ds = concatenate_datasets([ds, ds_clean_only], axis=1)
     return out_ds
 
 
