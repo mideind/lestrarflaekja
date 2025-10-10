@@ -379,7 +379,7 @@ def prepare_data(cfg: DataConfig) -> None:
 
     if cfg.output_repoid is not None:
         logger.info(f"pushing to huggingface hub: '{cfg.output_repoid}'")
-        out_ds.push_to_hub(cfg.output_repoid)
+        merged_ds.push_to_hub(cfg.output_repoid)
 
 
 def main() -> None:
