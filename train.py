@@ -97,6 +97,7 @@ def fooberino(cfg: Config) -> None:
     # }
 
     ds = hf_datasets.DatasetDict(ds)
+    ds.set_format("torch")
 
     # load model from huggingface
     logger.info(f"Loading model: {cfg.model_name}")
