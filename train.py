@@ -113,7 +113,7 @@ def fooberino(cfg: Config) -> None:
 
     def collate(examples):
         return {
-            "input_ids": torch.rnn.utils.pad_sequence(
+            "input_ids": torch.nn.utils.rnn.pad_sequence(
                 [x["input_ids"] for x in examples],
                 batch_first=True,
                 padding_value=tokenizer.eos_token_id,
