@@ -12,6 +12,7 @@ import logging
 import functools
 from dataclasses import dataclass
 
+import torch
 import datasets as hf_datasets
 from omegaconf import OmegaConf
 from transformers import (
@@ -145,7 +146,6 @@ def fooberino(cfg: Config) -> None:
         push_to_hub=False,
     )
 
-    print(ds)
     trainer = CustomLossTrainer(
         model=model,
         tokenizer=tokenizer,
