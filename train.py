@@ -149,7 +149,7 @@ def fooberino(cfg: Config) -> None:
         model=model,
         tokenizer=tokenizer,
         args=train_cfg,
-        data_collator=data_collator,
+        data_collator=collate,
         train_dataset=tokenized_datasets["train"],
         eval_dataset=tokenized_datasets["valid"],
     )
