@@ -119,7 +119,7 @@ def fooberino(cfg: Config) -> None:
                 batch_first=True,
                 padding_value=tokenizer.eos_token_id,
             ),
-            "weights": torch.nn.utils.pad_sequence(
+            "weights": torch.nn.utils.rnn.pad_sequence(
                 [x["weights"] for x in examples], batch_first=True, padding_value=0
             ),
         }
