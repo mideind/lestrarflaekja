@@ -89,13 +89,13 @@ def fooberino(cfg: Config) -> None:
     ds = hf_datasets.load_dataset(cfg.dataset_name)
 
     # # sample 100 datapoints from the dataset
-    # raw_datset = {
+    # ds = {
     #     "train": ds["train"].shuffle(seed=42).select(range(1000)),
     #     "valid": ds["validation"].shuffle(seed=42).select(range(100)),
     #     # "test": ds["test"].shuffle(seed=42).select(range(100)),
     # }
 
-    ds = hf_datasets.DatasetDict(raw_datset)
+    ds = hf_datasets.DatasetDict(ds)
 
     # load model from huggingface
     logger.info(f"Loading model: {cfg.model_name}")
