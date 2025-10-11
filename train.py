@@ -86,16 +86,16 @@ def fooberino(cfg: Config) -> None:
 
     # load dataset from huggingface
     logger.info(f"Loading dataset: {cfg.dataset_name}")
-    raw_dataset = hf_datasets.load_dataset(cfg.dataset_name)
+    ds = hf_datasets.load_dataset(cfg.dataset_name)
 
-    # sample 100 datapoints from the dataset
-    raw_datset = {
-        "train": raw_dataset["train"].shuffle(seed=42).select(range(1000)),
-        "valid": raw_dataset["validation"].shuffle(seed=42).select(range(100)),
-        # "test": raw_dataset["test"].shuffle(seed=42).select(range(100)),
-    }
+    # # sample 100 datapoints from the dataset
+    # raw_datset = {
+    #     "train": ds["train"].shuffle(seed=42).select(range(1000)),
+    #     "valid": ds["validation"].shuffle(seed=42).select(range(100)),
+    #     # "test": ds["test"].shuffle(seed=42).select(range(100)),
+    # }
 
-    raw_dataset = hf_datasets.DatasetDict(raw_datset)
+    ds = hf_datasets.DatasetDict(raw_datset)
 
     # load model from huggingface
     logger.info(f"Loading model: {cfg.model_name}")
@@ -103,10 +103,10 @@ def fooberino(cfg: Config) -> None:
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
 
     # fn_kwargs = {"cfg":cfg, "tokenizer":tokenizer}
-    # tokenized_datasets = raw_dataset.map(
-    #     # tokenize_fn, batched=True, remove_columns=raw_dataset["train"].column_names
-    #     # lambda x: tokenize(cfg, x, tokenizer), batched=True, remove_columns=raw_dataset["train"].column_names
-    #     tokenize, batched=True, remove_columns=raw_dataset["train"].column_names, fn_kwargs=fn_kwargs
+    # tokenized_datasets = ds.map(
+    #     # tokenize_fn, batched=True, remove_columns=ds["train"].column_names
+    #     # lambda x: tokenize(cfg, x, tokenizer), batched=True, remove_columns=ds["train"].column_names
+    #     tokenize, batched=True, remove_columns=ds["train"].column_names, fn_kwargs=fn_kwargs
     # )
     # data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
@@ -150,8 +150,8 @@ def fooberino(cfg: Config) -> None:
         tokenizer=tokenizer,
         args=train_cfg,
         data_collator=collate,
-        train_dataset=tokenized_datasets["train"],
-        eval_dataset=tokenized_datasets["valid"],
+        train_dataset=ds["train"],
+        eval_dataset=ds["valid"],
     )
 
     # Train the model
