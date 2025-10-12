@@ -170,25 +170,6 @@ class TruncatedLossTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 
-class CustomLossTrainer(Trainer):
-    def __init__(self, *args, loss_fn=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.loss_fn = loss_fn
-
-    def compute_loss(self, model, inputs, return_outputs=False):
-        labels = inputs.pop("labels")
-        outputs = model(**inputs)
-        logits = outputs.get("logits")
-
-        if self.loss_fn:
-            loss = self.loss_fn(logits, labels)
-        else:
-            # Fallback to default if no custom loss is provided
-            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
-
-        return (loss, outputs) if return_outputs else loss
-
-
 def tokenize(
     batch: dict, *, cfg: Config, tokenizer: AutoTokenizer, context_length: int = 1024
 ) -> dict:
@@ -219,7 +200,7 @@ def do_train(cfg: Config) -> None:
     ic(ds)
 
     def collate(examples):
-        return {
+        obj = {
             "input_ids": torch.nn.utils.rnn.pad_sequence(
                 [x["input_ids"] for x in examples],
                 batch_first=True,
@@ -229,24 +210,10 @@ def do_train(cfg: Config) -> None:
                 [x["weights"] for x in examples], batch_first=True, padding_value=0
             ),
         }
+        obj["labels"] = obj["input_ids"].clone()
+        return obj
 
     collator = ReconstructionTaskCollator(tokenizer)
-
-    # # sample 100 datapoints from the dataset
-    # ds = {
-    #     "train": ds["train"].shuffle(seed=42).select(range(1000)),
-    #     "valid": ds["validation"].shuffle(seed=42).select(range(100)),
-    #     # "test": ds["test"].shuffle(seed=42).select(range(100)),
-    # }
-
-    # fn_kwargs = {"cfg":cfg, "tokenizer":tokenizer}
-    # tokenized_datasets = ds.map(
-    #     # tokenize_fn, batched=True, remove_columns=ds["train"].column_names
-    #     # lambda x: tokenize(cfg, x, tokenizer), batched=True, remove_columns=ds["train"].column_names
-    #     tokenize, batched=True, remove_columns=ds["train"].column_names, fn_kwargs=fn_kwargs
-    # )
-    # data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
-    # train_dl = torch.utils.DataLoader(ds, batch_size=cfg.batch_size, collate_fn=collate)
 
     # load model from huggingface
     logger.info(f"Loading model: {cfg.model_name}")
@@ -254,7 +221,6 @@ def do_train(cfg: Config) -> None:
 
     # Load the base model with specific device mapping
     model = AutoModelForCausalLM.from_pretrained(cfg.model_name, dtype=torch.bfloat16)
-    # model.accepts_loss_kwargs = False
 
     if cfg.use_lora:
         if accelerator.is_main_process:
