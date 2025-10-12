@@ -204,7 +204,7 @@ def tokenize(
 def fooberino(cfg: Config) -> None:
     """fooberino function"""
 
-    # tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
     # load dataset from huggingface
     logger.info(f"Loading dataset: {cfg.dataset_name}")
     ds = hf_datasets.load_dataset(cfg.dataset_name)
