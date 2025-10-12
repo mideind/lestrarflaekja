@@ -21,6 +21,18 @@ from transformers import (
     DataCollatorForLanguageModeling,
 )
 from transformers import Trainer, TrainingArguments
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    DataCollatorForLanguageModeling,
+    Trainer,
+    TrainingArguments,
+    BitsAndBytesConfig,
+)
+from peft import PeftModel, LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from accelerate import Accelerator
+
+accelerator = Accelerator()
 
 logging.basicConfig(
     level=logging.INFO,
