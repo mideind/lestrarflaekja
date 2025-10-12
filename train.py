@@ -297,6 +297,7 @@ def do_train(cfg: Config) -> None:
         # fp16=False, # not allowed on mac
         bf16=True,  # not allowed on mac
         push_to_hub=False,
+        label_names=["labels", "weights"],
     )
 
     trainer = TruncatedLossTrainer(
