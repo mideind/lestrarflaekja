@@ -303,8 +303,8 @@ def do_train(cfg: Config) -> None:
         model=model,
         tokenizer=tokenizer,
         args=train_cfg,
-        # data_collator=collate,
-        data_collator=collator,
+        data_collator=collate,
+        # data_collator=collator,
         train_dataset=ds["train"],
         eval_dataset=ds["validation"],
     )
