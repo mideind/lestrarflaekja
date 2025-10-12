@@ -108,6 +108,7 @@ class TruncatedLossTrainer(Trainer):
     def compute_loss(
         self, model, inputs, return_outputs=False, num_items_in_batch=None
     ):
+        ic(list(inputs.keys()))
         input_ids = inputs["input_ids"]
         weights = inputs.get("weights", None)
         labels = inputs["labels"]
@@ -252,9 +253,7 @@ def do_train(cfg: Config) -> None:
     model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
 
     # Load the base model with specific device mapping
-    model = AutoModelForCausalLM.from_pretrained(
-        cfg.model_name, torch_dtype=torch.bfloat16
-    )
+    model = AutoModelForCausalLM.from_pretrained(cfg.model_name, dtype=torch.bfloat16)
     # model.accepts_loss_kwargs = False
 
     if cfg.use_lora:
