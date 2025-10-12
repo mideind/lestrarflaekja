@@ -66,7 +66,7 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
     def torch_call(self, examples: list[dict]) -> dict:
         # the super method does not handle our dict keys
 
-        assert "weight" in examples[0]
+        assert "weights" in examples[0]
 
         # Handle dict or lists with proper padding and conversion to tensor.
 
