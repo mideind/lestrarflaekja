@@ -66,6 +66,8 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
     def torch_call(self, examples: list[dict]) -> dict:
         # the super method does not handle our dict keys
 
+        assert "weight" in examples[0]
+
         # Handle dict or lists with proper padding and conversion to tensor.
 
         if self.seed and self.generator is None:
@@ -78,6 +80,7 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
             batch_first=True,
             padding_value=self.tokenizer.pad_token_id,
         )
+
         if "weights" in examples[0]:
             weights = torch.nn.utils.rnn.pad_sequence(
                 [torch.tensor(example["weights"]) for example in examples],
@@ -90,10 +93,10 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
 
             return {"input_ids": input_ids, "labels": labels, "weights": weights}
 
-            return {
-                "input_ids": input_ids,
-                "labels": labels,
-            }
+        return {
+            "input_ids": input_ids,
+            "labels": labels,
+        }
 
 
 class TruncatedLossTrainer(Trainer):
