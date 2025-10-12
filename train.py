@@ -275,7 +275,7 @@ def fooberino(cfg: Config) -> None:
         push_to_hub=False,
     )
 
-    trainer = CustomLossTrainer(
+    trainer = TruncatedLossTrainer(
         model=model,
         tokenizer=tokenizer,
         args=train_cfg,
