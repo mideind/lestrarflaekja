@@ -255,7 +255,7 @@ def do_train(cfg: Config) -> None:
     model = AutoModelForCausalLM.from_pretrained(
         cfg.model_name, torch_dtype=torch.bfloat16
     )
-    model.accepts_loss_kwargs = False
+    # model.accepts_loss_kwargs = False
 
     if cfg.use_lora:
         if accelerator.is_main_process:
