@@ -31,6 +31,8 @@ from transformers import (
 )
 from peft import PeftModel, LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from accelerate import Accelerator
+from icecream import ic
+
 
 accelerator = Accelerator()
 
@@ -65,8 +67,6 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
 
     def torch_call(self, examples: list[dict]) -> dict:
         # the super method does not handle our dict keys
-
-        from icecream import ic
 
         ic(examples[0].keys())
         assert "weights" in examples[0]
@@ -207,14 +207,15 @@ def tokenize(
     return {"input_ids": input_batch}
 
 
-def fooberino(cfg: Config) -> None:
-    """fooberino function"""
+def do_train(cfg: Config) -> None:
+    """do_train function"""
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
     # load dataset from huggingface
     logger.info(f"Loading dataset: {cfg.dataset_name}")
     ds = hf_datasets.load_dataset(cfg.dataset_name)
     ds.set_format("torch")
+    ic(ds)
 
     def collate(examples):
         return {
@@ -332,7 +333,7 @@ def main() -> None:
         logger.error(f"Error: {e}\n\nUsage: python scratch.py")
         sys.exit(1)
 
-    fooberino(cfg)
+    do_train(cfg)
 
 
 if __name__ == "__main__":
