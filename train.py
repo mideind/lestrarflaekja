@@ -60,6 +60,9 @@ class Config:
 class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
     """Collator for the reconstruction task."""
 
+    def __init__(self, tokenizer):
+        super().__init__(tokenizer, mlm=False)
+
     def torch_call(self, examples: list[dict]) -> dict:
         # the super method does not handle our dict keys
 
@@ -135,7 +138,7 @@ class TruncatedLossTrainer(Trainer):
         # if labels is not None:
         #     unwrapped_model = self.accelerator.unwrap_model(model)
         #     if _is_peft_model(unwrapped_model):
-        #         model_name = unwrapped_model.base_model.model._get_name()
+        #         model_name = unwrapped_model.model.model._get_name()
         #     else:
         #         model_name = unwrapped_model._get_name()
         #     # User-defined compute_loss function
@@ -219,6 +222,8 @@ def fooberino(cfg: Config) -> None:
             ),
         }
 
+    collator = ReconstructionTaskCollator(tokenizer)
+
     # # sample 100 datapoints from the dataset
     # ds = {
     #     "train": ds["train"].shuffle(seed=42).select(range(1000)),
@@ -259,12 +264,12 @@ def fooberino(cfg: Config) -> None:
         )
 
         # Apply LoRA to the model
-        model = get_peft_model(base_model, lora_config)
+        model = get_peft_model(model, lora_config)
 
     else:
         if accelerator.is_main_process:
             logger.info("Loading model without LoRA...")
-        model = base_model
+        model = model
 
     # Initialize Trainer with custom loss function if needed
 
@@ -291,7 +296,8 @@ def fooberino(cfg: Config) -> None:
         model=model,
         tokenizer=tokenizer,
         args=train_cfg,
-        data_collator=collate,
+        # data_collator=collate,
+        data_collator=collator,
         train_dataset=ds["train"],
         eval_dataset=ds["validation"],
     )
