@@ -53,10 +53,14 @@ class Config:
     dataset_name: str = "vesteinn/babylm"
     # dataset_name: str = "mideind/is_prototyping_corpus"
     model_name: str = "AI-Sweden-Models/gpt-sw3-126m"
+    # model_name: str = "AI-Sweden-Models/gpt-sw3-356m"
     batch_size: int = 32
     accumulate_steps: int = 1
     warmup_steps: int = 10
     use_lora: bool = False
+    lora_dropout: float = 0.05
+    lora_rank: int = 32
+    lora_alpha: int = 16
 
 
 class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
@@ -68,7 +72,6 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
     def torch_call(self, examples: list[dict]) -> dict:
         # the super method does not handle our dict keys
 
-        ic(examples[0].keys())
         assert "weights" in examples[0]
 
         # Handle dict or lists with proper padding and conversion to tensor.
@@ -108,7 +111,6 @@ class TruncatedLossTrainer(Trainer):
     def compute_loss(
         self, model, inputs, return_outputs=False, num_items_in_batch=None
     ):
-        ic(list(inputs.keys()))
         input_ids = inputs["input_ids"]
         weights = inputs.get("weights", None)
         labels = inputs["labels"]
