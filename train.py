@@ -56,11 +56,29 @@ class Config:
     # model_name: str = "AI-Sweden-Models/gpt-sw3-356m"
     batch_size: int = 32
     accumulate_steps: int = 1
-    warmup_steps: int = 10
+    warmup_steps: int = 100
     use_lora: bool = False
     lora_dropout: float = 0.05
     lora_rank: int = 32
     lora_alpha: int = 16
+    logging_steps: int = 10
+    max_steps: int = 1000
+    eval_steps: int = 100
+    save_steps: int = 1000
+
+    # eval_steps=cfg.eval_steps,
+    # logging_steps=cfg.logging_steps,
+    # gradient_accumulation_steps=cfg.accumulate_steps,
+    # num_train_epochs=1,
+    # weight_decay=0.01,
+    # warmup_steps=cfg.warmup_steps,
+    # lr_scheduler_type="cosine",
+    # learning_rate=5e-4,
+    # save_steps=cfg.save_steps,
+    # max_steps=cfg.max_steps,
+    # bf16=True,
+    # push_to_hub=False,
+    # label_names=["labels", "weights"],
 
 
 class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
@@ -247,22 +265,23 @@ def do_train(cfg: Config) -> None:
 
     # Initialize Trainer with custom loss function if needed
 
+    # bsz32.accum1 is 60k batches
     train_cfg = TrainingArguments(
         output_dir="./results",
         per_device_train_batch_size=cfg.batch_size,
         per_device_eval_batch_size=cfg.batch_size,
         eval_strategy="steps",
-        eval_steps=10,
-        logging_steps=10,
+        eval_steps=cfg.eval_steps,
+        logging_steps=cfg.logging_steps,
         gradient_accumulation_steps=cfg.accumulate_steps,
         num_train_epochs=1,
         weight_decay=0.01,
         warmup_steps=cfg.warmup_steps,
         lr_scheduler_type="cosine",
         learning_rate=5e-4,
-        save_steps=5_000,
-        # fp16=False, # not allowed on mac
-        bf16=True,  # not allowed on mac
+        save_steps=cfg.save_steps,
+        max_steps=cfg.max_steps,
+        bf16=True,
         push_to_hub=False,
         label_names=["labels", "weights"],
     )
