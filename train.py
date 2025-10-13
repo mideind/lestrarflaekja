@@ -52,8 +52,9 @@ class Config:
     # dataset_name: str = "mideind/mim-gold-21.05"
     dataset_name: str = "vesteinn/babylm"
     # dataset_name: str = "mideind/is_prototyping_corpus"
-    model_name: str = "AI-Sweden-Models/gpt-sw3-126m"
+    # model_name: str = "AI-Sweden-Models/gpt-sw3-126m"
     # model_name: str = "AI-Sweden-Models/gpt-sw3-356m"
+    model_name: str = "AI-Sweden-Models/gpt-sw3-1.3b"
     batch_size: int = 32
     accumulate_steps: int = 1
     warmup_steps: int = 100
@@ -65,6 +66,7 @@ class Config:
     max_steps: int = 1000
     eval_steps: int = 100
     save_steps: int = 1000
+    learning_rate: float = (5e-5,)
 
     # eval_steps=cfg.eval_steps,
     # logging_steps=cfg.logging_steps,
@@ -73,7 +75,6 @@ class Config:
     # weight_decay=0.01,
     # warmup_steps=cfg.warmup_steps,
     # lr_scheduler_type="cosine",
-    # learning_rate=5e-4,
     # save_steps=cfg.save_steps,
     # max_steps=cfg.max_steps,
     # bf16=True,
@@ -278,7 +279,7 @@ def do_train(cfg: Config) -> None:
         weight_decay=0.01,
         warmup_steps=cfg.warmup_steps,
         lr_scheduler_type="cosine",
-        learning_rate=5e-4,
+        learning_rate=cfg.learning_rate,
         save_steps=cfg.save_steps,
         max_steps=cfg.max_steps,
         bf16=True,
