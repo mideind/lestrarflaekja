@@ -172,6 +172,7 @@ class TruncatedLossTrainer(Trainer):
         ic(loss)
         if loss < 0.05:
             breakpoint()
+
         return (loss, outputs) if return_outputs else loss
 
     def _get_num_items_in_batch(
@@ -191,7 +192,7 @@ def tokenize(
     for text in batch["text"]:
         tokens = tokenizer(text, add_special_tokens=False)["input_ids"]
         all_tokens.extend(tokens)
-        all_tokens.append(tokenizer.eos_token_id)  # Add separator between texts
+        all_tokens.append(tokenizer.pad_token_id)  # Add separator between texts
 
     # Pack into fixed-length sequences
     input_batch = []
@@ -205,6 +206,8 @@ def do_train(cfg: Config) -> None:
     """do_train function"""
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    tokenizer.pad_token_id = tokenizer.eos_token_id
+
     # load dataset from huggingface
     logger.info(f"Loading dataset: {cfg.dataset_name}")
     ds = hf_datasets.load_dataset(cfg.dataset_name)
@@ -216,7 +219,7 @@ def do_train(cfg: Config) -> None:
             "input_ids": torch.nn.utils.rnn.pad_sequence(
                 [x["input_ids"] for x in examples],
                 batch_first=True,
-                padding_value=tokenizer.eos_token_id,
+                padding_value=tokenizer.pad_token_id,
             ),
             "weights": torch.nn.utils.rnn.pad_sequence(
                 [x["weights"] for x in examples], batch_first=True, padding_value=0
