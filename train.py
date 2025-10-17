@@ -117,7 +117,7 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
         # shift the input so we predict the next token
         labels = input_ids.roll(-1)
         labels[:, -1] = self.tokenizer.pad_token_id
-        labels[labels == self.tokenizer.pad_token_id] = -100
+        labels[labels.eq(self.tokenizer.pad_token_id)] = -100
 
         if "weights" in examples[0]:
             weights = torch.nn.utils.rnn.pad_sequence(
@@ -150,26 +150,35 @@ class TruncatedLossTrainer(Trainer):
         weights = inputs.get("weights", None)
         labels = inputs["labels"]
 
+        bsz = input_ids.shape[0]
+        seq_len = input_ids.shape[1]
+
         if weights is None:
             weights = torch.ones_like(input_ids)
 
         outputs = model(input_ids=input_ids, labels=labels)
         logits = outputs["logits"]
 
+        # self.tokenizer.decode(input_ids[0])
+        # self.tokenizer.decode(input_ids[0][loss_participation_mask[0]])
         loss_participation_mask = weights.ne(0).logical_and(labels.gt(0))
+
+        loc_first_tgts = weights.argmax(-1).unsqueeze(-1)
+        first_k_real_tgts = torch.arange(seq_len).tile(bsz, 1).to(weights.device)
+        first_k_real_tgts = first_k_real_tgts.lt(loc_first_tgts + 16)
+        loss_participation_mask = loss_participation_mask.logical_and(
+            first_k_real_tgts.logical_not()
+        )
 
         flat_logits = logits[loss_participation_mask]
         flat_labels = labels[loss_participation_mask]
 
         loss = torch.nn.functional.cross_entropy(
-            flat_logits,
-            flat_labels,
-            reduction="mean",
+            flat_logits, flat_labels, reduction="mean"
         )
         # convert nats to bits
         loss = loss / NAT_LOG_OF_2
 
-        ic(loss)
         if loss < 0.05:
             breakpoint()
 
