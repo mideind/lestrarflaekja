@@ -169,6 +169,7 @@ class TruncatedLossTrainer(Trainer):
         # convert nats to bits
         loss = loss / NAT_LOG_OF_2
 
+        ic(loss)
         return (loss, outputs) if return_outputs else loss
 
     def _get_num_items_in_batch(
