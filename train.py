@@ -156,7 +156,7 @@ class TruncatedLossTrainer(Trainer):
 
         # attention_mask = inputs["attention_mask"]
         # (B × T)
-        input_mask = input_ids.ne(self.tokenizer.pad_token_id).char()
+        input_mask = input_ids.ne(self.tokenizer.pad_token_id).long()
         # (B × T × 1) · (B × 1 × T) → (B × T × T)
         input_mask = input_mask.unsqueeze(-1) @ input_mask.unsqueeze(1)
         # (B × T × T)
