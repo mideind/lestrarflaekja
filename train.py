@@ -106,6 +106,13 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
             padding_value=self.tokenizer.pad_token_id,
         )
 
+        # (B × T)
+        input_mask = input_ids.ne(self.tokenizer.pad_token_id)
+        # (B × T × 1) · (B × 1 × T) → (B × T × T)
+        input_mask = input_mask.unsqueeze(-1) @ input_mask.unsqueeze(1)
+        # (B × T × T)
+        attention_mask = input_mask.tril()
+
         # shift the input so we predict the next token
         labels = input_ids.roll(-1)
         labels[:, -1] = self.tokenizer.pad_token_id
@@ -118,11 +125,17 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
                 padding_value=0,
             ).float()
 
-            return {"input_ids": input_ids, "labels": labels, "weights": weights}
+            return {
+                "input_ids": input_ids,
+                "labels": labels,
+                "weights": weights,
+                "attention_mask": attention_mask,
+            }
 
         return {
             "input_ids": input_ids,
             "labels": labels,
+            "attention_mask": attention_mask,
         }
 
 
