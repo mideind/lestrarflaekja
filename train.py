@@ -157,8 +157,8 @@ class TruncatedLossTrainer(Trainer):
 
         loss_participation_mask = weights.gt(0).logical_and(labels.gt(0))
 
-        flat_logits = logits[loss_contribution_mask]
-        flat_labels = labels[loss_contribution_mask]
+        flat_logits = logits[loss_participation_mask]
+        flat_labels = labels[loss_participation_mask]
 
         loss = torch.nn.functional.cross_entropy(
             flat_logits,
