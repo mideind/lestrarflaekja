@@ -291,7 +291,7 @@ def do_train(cfg: Config) -> None:
         learning_rate=cfg.learning_rate,
         bf16=True,
         push_to_hub=False,
-        label_names=["labels", "weights"],
+        label_names=["labels", "weights", "attention_mask"],
         disable_tqdm=True,
     )
 
