@@ -150,21 +150,25 @@ class TruncatedLossTrainer(Trainer):
         weights = inputs.get("weights", None)
         labels = inputs["labels"]
 
+        bsz = input_ids.shape[0]
+        seq_len = input_ids.shape[1]
+
         # ic(list(inputs.keys()))
         # print()
         # breakpoint()
 
         # attention_mask = inputs["attention_mask"]
         # (B × T)
-        input_mask = input_ids.ne(self.tokenizer.pad_token_id)
+        input_mask = input_ids.new_ones(bsz, seq_len, seq_len)
+        input_mask = (
+            input_mask * input_ids.ne(self.tokenizer.pad_token_id).unsqueeze(1)
+        ) * input_ids.ne(self.tokenizer.pad_token_id).unsqueeze(-1)
+
         # (B × T × 1) · (B × 1 × T) → (B × T × T)
-        input_mask = input_mask.unsqueeze(-1).cpu() @ input_mask.unsqueeze(1).cpu()
-        input_mask = input_mask.to(input_ids.device)
+        # input_mask = input_mask.unsqueeze(-1) @ input_mask.unsqueeze(1)
+        # input_mask = input_mask.to(input_ids.device)
         # (B × T × T)
         attention_mask = input_mask.tril()
-
-        bsz = input_ids.shape[0]
-        seq_len = input_ids.shape[1]
 
         if weights is None:
             weights = torch.ones_like(input_ids)
