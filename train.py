@@ -163,7 +163,7 @@ class TruncatedLossTrainer(Trainer):
         loss = torch.nn.functional.cross_entropy(
             flat_logits,
             flat_labels,
-            reduction="sum",
+            reduction="mean",
         )
 
         return (loss, outputs) if return_outputs else loss
