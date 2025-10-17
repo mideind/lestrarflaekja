@@ -170,6 +170,8 @@ class TruncatedLossTrainer(Trainer):
         loss = loss / NAT_LOG_OF_2
 
         ic(loss)
+        if loss < 0.05:
+            breakpoint()
         return (loss, outputs) if return_outputs else loss
 
     def _get_num_items_in_batch(
@@ -275,6 +277,7 @@ def do_train(cfg: Config) -> None:
         bf16=True,
         push_to_hub=False,
         label_names=["labels", "weights"],
+        disable_tqdm=True,
     )
 
     trainer = TruncatedLossTrainer(
