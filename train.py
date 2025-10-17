@@ -66,7 +66,7 @@ class Config:
     max_steps: int = 1000
     eval_steps: int = 100
     save_steps: int = 1000
-    learning_rate: float = (5e-5,)
+    learning_rate: float = 5e-5
 
     # eval_steps=cfg.eval_steps,
     # logging_steps=cfg.logging_steps,
