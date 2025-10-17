@@ -155,22 +155,15 @@ class TruncatedLossTrainer(Trainer):
         outputs = model(input_ids=input_ids, labels=labels)
         logits = outputs["logits"]
 
-        nonzero_weight_mask = weights.ge(0)
-        # is_input_and_not_padding = labels.neq(-100) # neq() is deprecated
-        is_input_and_not_padding = labels != -100
-        loss_contribution_mask = nonzero_weight_mask.logical_and(
-            is_input_and_not_padding
-        )
+        loss_participation_mask = weights.gt(0).logical_and(labels.gt(0))
 
         flat_logits = logits[loss_contribution_mask]
         flat_labels = labels[loss_contribution_mask]
-        breakpoint()
 
         loss = torch.nn.functional.cross_entropy(
-            # flat_logits, flat_labels, reduction="mean"
             flat_logits,
             flat_labels,
-            reduction="sum",
+            reduction="mean",
         )
 
         ##########
