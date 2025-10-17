@@ -149,6 +149,9 @@ class TruncatedLossTrainer(Trainer):
         input_ids = inputs["input_ids"]
         weights = inputs.get("weights", None)
         labels = inputs["labels"]
+        ic(list(inputs.keys()))
+        print()
+        breakpoint()
         attention_mask = inputs["attention_mask"]
 
         bsz = input_ids.shape[0]
