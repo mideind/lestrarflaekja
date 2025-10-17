@@ -155,7 +155,7 @@ class TruncatedLossTrainer(Trainer):
         outputs = model(input_ids=input_ids, labels=labels)
         logits = outputs["logits"]
 
-        loss_participation_mask = weights.gt(0).logical_and(labels.gt(0))
+        loss_participation_mask = weights.ne(0).logical_and(labels.gt(0))
 
         flat_logits = logits[loss_participation_mask]
         flat_labels = labels[loss_participation_mask]
@@ -166,41 +166,14 @@ class TruncatedLossTrainer(Trainer):
             reduction="sum",
         )
 
-        ##########
-        ### from super class
-
-        # outputs = model(**inputs)
-        # # Save past state if it exists
-        # # TODO: this needs to be fixed and made cleaner later.
-        # if self.args.past_index >= 0:
-        #     self._past = outputs[self.args.past_index]
-
-        # if labels is not None:
-        #     unwrapped_model = self.accelerator.unwrap_model(model)
-        #     if _is_peft_model(unwrapped_model):
-        #         model_name = unwrapped_model.model.model._get_name()
-        #     else:
-        #         model_name = unwrapped_model._get_name()
-        #     # User-defined compute_loss function
-        #     if self.compute_loss_func is not None:
-        #         loss = self.compute_loss_func(
-        #             outputs, labels, num_items_in_batch=num_items_in_batch
-        #         )
-        #     elif model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
-        #         loss = self.label_smoother(outputs, labels, shift_labels=True)
-        #     else:
-        #         loss = self.label_smoother(outputs, labels)
-
-        # if (
-        #     self.args.average_tokens_across_devices
-        #     and (self.model_accepts_loss_kwargs or self.compute_loss_func)
-        #     and num_items_in_batch is not None
-        # ):
-        #     loss *= self.accelerator.num_processes
-
-        ##########
-
         return (loss, outputs) if return_outputs else loss
+
+    def _get_num_items_in_batch(
+        self, batch_samples: list, device: torch.device
+    ) -> int | None:
+        if "weights" not in batch_samples[0]:
+            return sum((batch["labels"].ne(-100)).sum() for batch in batch_samples)
+        return sum((batch["weights"].ne(0)).sum() for batch in batch_samples)
 
 
 def tokenize(
