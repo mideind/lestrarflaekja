@@ -149,6 +149,7 @@ class TruncatedLossTrainer(Trainer):
         input_ids = inputs["input_ids"]
         weights = inputs.get("weights", None)
         labels = inputs["labels"]
+        attention_mask = inputs["attention_mask"]
 
         bsz = input_ids.shape[0]
         seq_len = input_ids.shape[1]
@@ -156,11 +157,11 @@ class TruncatedLossTrainer(Trainer):
         if weights is None:
             weights = torch.ones_like(input_ids)
 
-        outputs = model(input_ids=input_ids, labels=labels)
+        outputs = model(
+            input_ids=input_ids, attention_mask=attention_mask, labels=labels
+        )
         logits = outputs["logits"]
 
-        # self.tokenizer.decode(input_ids[0])
-        # self.tokenizer.decode(input_ids[0][loss_participation_mask[0]])
         loss_participation_mask = weights.ne(0).logical_and(labels.gt(0))
 
         loc_first_tgts = weights.argmax(-1).unsqueeze(-1)
@@ -180,6 +181,8 @@ class TruncatedLossTrainer(Trainer):
         loss = loss / NAT_LOG_OF_2
 
         if loss < 0.05:
+            ic(self.tokenizer.decode(input_ids[0]))
+            ic(self.tokenizer.decode(input_ids[0][loss_participation_mask[0]]))
             breakpoint()
 
         return (loss, outputs) if return_outputs else loss
