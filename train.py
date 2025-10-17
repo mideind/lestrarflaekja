@@ -149,10 +149,18 @@ class TruncatedLossTrainer(Trainer):
         input_ids = inputs["input_ids"]
         weights = inputs.get("weights", None)
         labels = inputs["labels"]
-        ic(list(inputs.keys()))
-        print()
-        breakpoint()
-        attention_mask = inputs["attention_mask"]
+
+        # ic(list(inputs.keys()))
+        # print()
+        # breakpoint()
+
+        # attention_mask = inputs["attention_mask"]
+        # (B × T)
+        input_mask = input_ids.ne(self.tokenizer.pad_token_id)
+        # (B × T × 1) · (B × 1 × T) → (B × T × T)
+        input_mask = input_mask.unsqueeze(-1) @ input_mask.unsqueeze(1)
+        # (B × T × T)
+        attention_mask = input_mask.tril()
 
         bsz = input_ids.shape[0]
         seq_len = input_ids.shape[1]
