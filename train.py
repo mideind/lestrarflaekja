@@ -158,11 +158,12 @@ class TruncatedLossTrainer(Trainer):
         # breakpoint()
 
         # attention_mask = inputs["attention_mask"]
+        pad_token_id = self.processing_class.pad_token_id
         # (B × T)
         input_mask = input_ids.new_ones(bsz, seq_len, seq_len)
         input_mask = (
-            input_mask * input_ids.ne(self.processor_class.pad_token_id).unsqueeze(1)
-        ) * input_ids.ne(self.tokenizer.pad_token_id).unsqueeze(-1)
+            input_mask * input_ids.ne(pad_token_id).unsqueeze(1)
+        ) * input_ids.ne(pad_token_id).unsqueeze(-1)
 
         # (B × T × 1) · (B × 1 × T) → (B × T × T)
         # input_mask = input_mask.unsqueeze(-1) @ input_mask.unsqueeze(1)
