@@ -106,15 +106,17 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
             padding_value=self.tokenizer.pad_token_id,
         )
 
+        # shift the input so we predict the next token
+        labels = input_ids.roll(-1)
+        labels[:, -1] = self.tokenizer.pad_token_id
+        labels[labels == self.tokenizer.pad_token_id] = -100
+
         if "weights" in examples[0]:
             weights = torch.nn.utils.rnn.pad_sequence(
                 [torch.tensor(example["weights"]) for example in examples],
                 batch_first=True,
                 padding_value=0,
             ).float()
-
-            labels = input_ids.clone()
-            labels[labels == self.tokenizer.pad_token_id] = -100
 
             return {"input_ids": input_ids, "labels": labels, "weights": weights}
 
@@ -292,9 +294,8 @@ def do_train(cfg: Config) -> None:
         tokenizer=tokenizer,
         args=train_cfg,
         data_collator=collate,
-        # data_collator=collator,
         train_dataset=ds["train"],
-        eval_dataset=ds["validation"],
+        eval_dataset=ds["validation"].select(range(2000)),
     )
 
     # Train the model
