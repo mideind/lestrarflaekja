@@ -164,9 +164,13 @@ class TruncatedLossTrainer(Trainer):
 
         flat_logits = logits[loss_contribution_mask]
         flat_labels = labels[loss_contribution_mask]
+        breakpoint()
 
         loss = torch.nn.functional.cross_entropy(
-            flat_logits, flat_labels, reduction="mean"
+            # flat_logits, flat_labels, reduction="mean"
+            flat_logits,
+            flat_labels,
+            reduction="sum",
         )
 
         ##########
@@ -320,8 +324,8 @@ def do_train(cfg: Config) -> None:
     logger.info("Saving the model...")
     trainer.save_model("./trained_model")
 
-    breakpoint()
-    pass
+    # breakpoint()
+    # pass
 
 
 def main() -> None:
