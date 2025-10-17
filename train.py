@@ -53,8 +53,8 @@ class Config:
     dataset_name: str = "vesteinn/babylm"
     # dataset_name: str = "mideind/is_prototyping_corpus"
     # model_name: str = "AI-Sweden-Models/gpt-sw3-126m"
-    # model_name: str = "AI-Sweden-Models/gpt-sw3-356m"
-    model_name: str = "AI-Sweden-Models/gpt-sw3-1.3b"
+    model_name: str = "AI-Sweden-Models/gpt-sw3-356m"
+    # model_name: str = "AI-Sweden-Models/gpt-sw3-1.3b"
     batch_size: int = 32
     accumulate_steps: int = 1
     warmup_steps: int = 100
@@ -62,7 +62,7 @@ class Config:
     lora_dropout: float = 0.05
     lora_rank: int = 32
     lora_alpha: int = 16
-    logging_steps: int = 10
+    logging_steps: int = 5
     max_steps: int = 1000
     eval_steps: int = 100
     save_steps: int = 1000
