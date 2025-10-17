@@ -42,6 +42,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+NAT_LOG_OF_2 = 0.6931471805599453
 
 
 @dataclass
@@ -165,6 +166,8 @@ class TruncatedLossTrainer(Trainer):
             flat_labels,
             reduction="mean",
         )
+        # convert nats to bits
+        loss = loss / NAT_LOG_OF_2
 
         return (loss, outputs) if return_outputs else loss
 
