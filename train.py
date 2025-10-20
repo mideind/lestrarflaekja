@@ -179,27 +179,30 @@ class TruncatedLossTrainer(Trainer):
         )
         logits = outputs["logits"]
 
-        loss_participation_mask = weights.ne(0).logical_and(labels.gt(0))
+        mask_keep_loss = weights.gt(0).logical_and(labels.gt(0))
 
-        loc_first_tgts = weights.argmax(-1).unsqueeze(-1)
-        first_k_real_tgts = torch.arange(seq_len).tile(bsz, 1).to(weights.device)
-        first_k_real_tgts = first_k_real_tgts.lt(loc_first_tgts + 16)
-        loss_participation_mask = loss_participation_mask.logical_and(
-            first_k_real_tgts.logical_not()
+        # # ignore first k tokens of real targets
+        # loc_first_tgts = weights.argmax(-1).unsqueeze(-1)
+        # first_k_real_tgts = torch.arange(seq_len).tile(bsz, 1).to(weights.device)
+        # first_k_real_tgts = first_k_real_tgts.lt(loc_first_tgts + 16)
+        # mask_keep_loss = mask_keep_loss.logical_and(
+        #     first_k_real_tgts.logical_not()
+        # )
+
+        flat_logits = logits[mask_keep_loss]
+        flat_labels = labels[mask_keep_loss]
+
+        # division by ln(2) converts nats to bits
+        loss = (
+            torch.nn.functional.cross_entropy(
+                flat_logits, flat_labels, reduction="mean"
+            )
+            / NAT_LOG_OF_2
         )
-
-        flat_logits = logits[loss_participation_mask]
-        flat_labels = labels[loss_participation_mask]
-
-        loss = torch.nn.functional.cross_entropy(
-            flat_logits, flat_labels, reduction="mean"
-        )
-        # convert nats to bits
-        loss = loss / NAT_LOG_OF_2
 
         if loss < 0.05:
             ic(self.tokenizer.decode(input_ids[0]))
-            ic(self.tokenizer.decode(input_ids[0][loss_participation_mask[0]]))
+            ic(self.tokenizer.decode(input_ids[0][mask_keep_loss[0]]))
             breakpoint()
 
         return (loss, outputs) if return_outputs else loss
