@@ -199,7 +199,7 @@ def do_train(cfg: Config) -> None:
     ds = hf_datasets.load_dataset(cfg.dataset_name)
     ds.set_format("torch")
 
-    def convert_example_to_byt5(example, tokenizer):
+    def convert_example_to_byt5(example):
         input_ids = example["input_ids"]
         weights = example["weights"]
 
