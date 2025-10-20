@@ -55,8 +55,9 @@ class Config:
     dataset_name: str = "mideind/lestur.soup.igc"
     # dataset_name: str = "mideind/is_prototyping_corpus"
     # model_name: str = "AI-Sweden-Models/gpt-sw3-126m"
-    model_name: str = "AI-Sweden-Models/gpt-sw3-356m"
+    # model_name: str = "AI-Sweden-Models/gpt-sw3-356m"
     # model_name: str = "AI-Sweden-Models/gpt-sw3-1.3b"
+    model_name: str = "mideind/byt5-large-spanmask-pretrain"
     batch_size: int = 32
     accumulate_steps: int = 1
     warmup_steps: int = 100
@@ -109,11 +110,11 @@ class Config:
 #         ).float()
 
 #         # (B × T)
-#         input_mask = input_ids.ne(self.tokenizer.pad_token_id)
+#         decoder_attn_mask = input_ids.ne(self.tokenizer.pad_token_id)
 #         # (B × T × 1) · (B × 1 × T) → (B × T × T)
-#         input_mask = input_mask.unsqueeze(-1) @ input_mask.unsqueeze(1)
+#         decoder_attn_mask = decoder_attn_mask.unsqueeze(-1) @ decoder_attn_mask.unsqueeze(1)
 #         # (B × T × T)
-#         attention_mask = input_mask.tril()
+#         attention_mask = decoder_attn_mask.tril()
 
 #         # shift the input so we predict the next token
 #         labels = input_ids.roll(-1)
@@ -134,34 +135,54 @@ class TruncatedLossTrainer(Trainer):
     def compute_loss(
         self, model, inputs, return_outputs=False, num_items_in_batch=None
     ):
-        input_ids = inputs["input_ids"]
-        labels = inputs["labels"]
-        attention_mask = inputs["attention_mask"]
-        mask_keep_loss = inputs["mask_keep_loss"]
+        # decoder-only model
+        if "input_ids" in inputs:
+            input_ids = inputs["input_ids"]
+            labels = inputs["labels"]
+            attention_mask = inputs["attention_mask"]
+            mask_keep_loss = inputs["mask_keep_loss"]
 
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-        logits = outputs["logits"]
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+            logits = outputs["logits"]
 
-        # filter out padding and loss-truncation
-        flat_logits = logits[mask_keep_loss]
-        flat_labels = labels[mask_keep_loss]
+            # filter out padding and loss-truncation
+            flat_logits = logits[mask_keep_loss]
+            flat_labels = labels[mask_keep_loss]
 
-        # division by ln(2) converts nats to bits
-        loss = (
-            torch.nn.functional.cross_entropy(
-                flat_logits, flat_labels, reduction="mean"
+            # division by ln(2) converts nats to bits
+            loss = (
+                torch.nn.functional.cross_entropy(
+                    flat_logits, flat_labels, reduction="mean"
+                )
+                / NAT_LOG_OF_2
             )
-            / NAT_LOG_OF_2
-        )
 
-        return (loss, outputs) if return_outputs else loss
+            return (loss, outputs) if return_outputs else loss
+
+        else:
+            # encoder decoder model (byt5)
+            assert "enc_input_ids" in inputs
+            enc_input_ids = inputs["enc_input_ids"]
+            unshifted_labels = inputs["unshifted_labels"]
+
+            # we assume the t5 class shifts the labels, converts -100 to padding and constructs attention mask
+
+            outputs = model(enc_input_ids, labels=unshifted_labels)
 
     def _get_num_items_in_batch(
         self, batch_samples: list, device: torch.device
     ) -> int | None:
-        if "weights" not in batch_samples[0]:
+        # decoder-only model
+        if "weights" in batch_samples[0]:
+            return sum((batch["weights"].gt(0)).sum() for batch in batch_samples)
+        elif "labels" in batch_samples[0]:
+            assert "labels" in batch_samples[0]
             return sum((batch["labels"].ne(-100)).sum() for batch in batch_samples)
-        return sum((batch["weights"].gt(0)).sum() for batch in batch_samples)
+        else:
+            assert "unshifted_labels" in batch_samples[0]
+            return sum(
+                (batch["unshifted_labels"].ne(-100)).sum() for batch in batch_samples
+            )
 
 
 def do_train(cfg: Config) -> None:
@@ -170,11 +191,48 @@ def do_train(cfg: Config) -> None:
     # tokenizer = AutoTokenizer.from_pretrained("AI-Sweden-Models/gpt-sw3-356m")
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
     tokenizer.pad_token_id = tokenizer.eos_token_id
+    byte_tokenizer = AutoTokenizer.from_pretrained("google/byt5-small")
 
     # load dataset from huggingface
     logger.info(f"Loading dataset: {cfg.dataset_name}")
     ds = hf_datasets.load_dataset(cfg.dataset_name)
     ds.set_format("torch")
+
+    def convert_example_to_byt5(example, tokenizer):
+        input_ids = example["input_ids"]
+        weights = example["weights"]
+
+        source_ids = input_ids[weights.eq(0)]
+        target_ids = input_ids[weights.gt(0)]
+
+        enc_input_ids = torch.tensor(tokenizer.decode(source_ids).encode("utf8") + 3)
+        dec_input_ids = torch.tensor(tokenizer.decode(target_ids).encode("utf8") + 3)
+        weights = torch.ones_like(dec_input_ids).float()
+
+        return {
+            "enc_input_ids": enc_input_ids,
+            "dec_input_ids": dec_input_ids,
+        }
+
+    def collate_for_byt5(examples):
+        examples = [convert_example_to_byt5(ex) for ex in examples]
+
+        enc_input_ids = torch.nn.utils.rnn.pad_sequence(
+            [ex["enc_input_ids"] for ex in examples],
+            batch_first=True,
+            padding_value=tokenizer.pad_token_id,
+        )
+
+        dec_input_ids = torch.nn.utils.rnn.pad_sequence(
+            [ex["dec_input_ids"] for ex in examples],
+            batch_first=True,
+            padding_value=-100,
+        )
+
+        return {
+            "enc_input_ids": enc_input_ids,
+            "unshifted_labels": dec_input_ids,
+        }
 
     def collate(examples):
         bsz = len(examples)
@@ -204,11 +262,13 @@ def do_train(cfg: Config) -> None:
         # ).float()
 
         # (B × T)
-        input_mask = input_ids.ne(pad_token_id)
+        decoder_attn_mask = input_ids.ne(pad_token_id)
         # (B × T × 1) ⨀ (B × 1 × T) → (B × T × T)
-        input_mask = input_mask[:, :, None] * input_mask[:, None, :]
+        decoder_attn_mask = (
+            decoder_attn_mask[:, :, None] * decoder_attn_mask[:, None, :]
+        )
         # (B × T × T)
-        attention_mask = input_mask.tril()
+        attention_mask = decoder_attn_mask.tril()
 
         # shift the input so we predict the next token
         labels = input_ids.roll(-1)
@@ -233,8 +293,6 @@ def do_train(cfg: Config) -> None:
             "attention_mask": attention_mask,
             "mask_keep_loss": mask_keep_loss,
         }
-
-    # collator = ReconstructionTaskCollator(tokenizer)
 
     # load model from huggingface
     logger.info(f"Loading model: {cfg.model_name}")
@@ -293,7 +351,7 @@ def do_train(cfg: Config) -> None:
         model=model,
         tokenizer=tokenizer,
         args=train_cfg,
-        data_collator=collate,
+        data_collator=collate_for_byt5 if "t5" in cfg.model_name else collate,
         train_dataset=ds["train"],
         eval_dataset=ds["validation"].select(range(2000)),
     )
