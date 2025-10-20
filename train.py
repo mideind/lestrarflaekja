@@ -170,6 +170,7 @@ class TruncatedLossTrainer(Trainer):
             # we assume the t5 class shifts the labels, converts -100 to padding and constructs attention mask
 
             outputs = model(enc_input_ids, labels=unshifted_labels)
+            return (loss, outputs) if return_outputs else loss
 
     def _get_num_items_in_batch(
         self, batch_samples: list, device: torch.device
