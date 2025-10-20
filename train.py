@@ -198,6 +198,7 @@ def do_train(cfg: Config) -> None:
 
     def collate(examples):
         bsz = len(examples)
+        pad_token_id = tokenizer.pad_token_id
 
         input_ids = torch.nn.utils.rnn.pad_sequence(
             [ex["input_ids"] for ex in examples],
