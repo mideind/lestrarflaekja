@@ -232,8 +232,8 @@ def do_train(cfg: Config) -> None:
 
         # shift the input so we predict the next token
         labels = input_ids.roll(-1)
-        labels[:, -1] = self.tokenizer.pad_token_id
-        labels[labels.eq(self.tokenizer.pad_token_id)] = -100
+        labels[:, -1] = pad_token_id
+        labels[labels.eq(pad_token_id)] = -100
 
         mask_keep_loss = weights.gt(0).logical_and(labels.gt(0))
 
