@@ -206,8 +206,12 @@ def do_train(cfg: Config) -> None:
         source_ids = input_ids[weights.eq(0)]
         target_ids = input_ids[weights.gt(0)]
 
-        enc_input_ids = torch.tensor(tokenizer.decode(source_ids).encode("utf8") + 3)
-        dec_input_ids = torch.tensor(tokenizer.decode(target_ids).encode("utf8") + 3)
+        enc_input_ids = torch.tensor(
+            byte_tokenizer(tokenizer.decode(source_ids)).input_ids
+        )
+        dec_input_ids = torch.tensor(
+            byte_tokenizer(tokenizer.decode(target_ids)).input_ids
+        )
         weights = torch.ones_like(dec_input_ids).float()
 
         return {
