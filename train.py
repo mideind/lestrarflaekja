@@ -17,6 +17,7 @@ import datasets as hf_datasets
 from omegaconf import OmegaConf
 from transformers import (
     AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
 )
@@ -296,10 +297,16 @@ def do_train(cfg: Config) -> None:
 
     # load model from huggingface
     logger.info(f"Loading model: {cfg.model_name}")
-    # model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
 
-    # Load the base model with specific device mapping
-    model = AutoModelForCausalLM.from_pretrained(cfg.model_name, dtype=torch.bfloat16)
+    if "byt5" in cfg.model_name:
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            cfg.model_name, dtype=torch.bfloat16
+        )
+    else:
+        # Load the base model with specific device mapping
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg.model_name, dtype=torch.bfloat16
+        )
 
     if cfg.use_lora:
         if accelerator.is_main_process:
