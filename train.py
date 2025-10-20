@@ -146,6 +146,8 @@ class TruncatedLossTrainer(Trainer):
     def compute_loss(
         self, model, inputs, return_outputs=False, num_items_in_batch=None
     ):
+        pad_token_id = self.processing_class.pad_token_id
+
         input_ids = inputs["input_ids"]
         weights = inputs.get("weights", None)
         labels = inputs["labels"]
@@ -153,26 +155,15 @@ class TruncatedLossTrainer(Trainer):
         bsz = input_ids.shape[0]
         seq_len = input_ids.shape[1]
 
-        # ic(list(inputs.keys()))
-        # print()
-        # breakpoint()
+        if weights is None:
+            weights = input_ids.ne(pad_token_id).long()
 
-        # attention_mask = inputs["attention_mask"]
-        pad_token_id = self.processing_class.pad_token_id
         # (B × T)
-        input_mask = input_ids.new_ones(bsz, seq_len, seq_len)
-        input_mask = (
-            input_mask * input_ids.ne(pad_token_id).unsqueeze(1)
-        ) * input_ids.ne(pad_token_id).unsqueeze(-1)
-
-        # (B × T × 1) · (B × 1 × T) → (B × T × T)
-        # input_mask = input_mask.unsqueeze(-1) @ input_mask.unsqueeze(1)
-        # input_mask = input_mask.to(input_ids.device)
+        input_mask = input_ids.ne(pad_token_id)
+        # (B × T × 1) ⨀ (B × 1 × T) → (B × T × T)
+        input_mask = input_mask[:, :, None] * input_mask[:, None, :]
         # (B × T × T)
         attention_mask = input_mask.tril()
-
-        if weights is None:
-            weights = torch.ones_like(input_ids)
 
         outputs = model(
             input_ids=input_ids, attention_mask=attention_mask, labels=labels
