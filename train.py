@@ -88,7 +88,6 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
 
     def __init__(self, tokenizer):
         super().__init__(tokenizer, mlm=False)
-        self.prefix = torch.tensor(self.tokenizer.encode("orðasúpa og endurskrif:"))
 
     def torch_call(self, examples: list[dict]) -> dict:
         # the super method does not handle our dict keys
@@ -104,13 +103,30 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
 
         bsz = len(examples)
 
+        # input_ids = torch.nn.utils.rnn.pad_sequence(
+        #     # [torch.tensor(example["input_ids"]) for example in examples],
+        #     [example["input_ids"] for example in examples],
+        #     batch_first=True,
+        #     padding_value=self.tokenizer.pad_token_id,
+        # )
+
+        # weights = torch.nn.utils.rnn.pad_sequence(
+        #     # [torch.tensor(example["weights"]) for example in examples],
+        #     [example["weights"] for example in examples],
+        #     batch_first=True,
+        #     padding_value=0,
+        # ).float()
+
         input_ids = torch.nn.utils.rnn.pad_sequence(
-            [torch.tensor(example["input_ids"]) for example in examples],
+            [ex["input_ids"][ex["weights"].gt(0)] for ex in examples],
             batch_first=True,
             padding_value=self.tokenizer.pad_token_id,
         )
-        prefix = self.prefix.tile(bsz, 1).to(input_ids.device)
-        input_ids = torch.cat([prefix, input_ids], dim=1)
+        weights = torch.nn.utils.rnn.pad_sequence(
+            [ex["weights"][ex["weights"].gt(0)] for ex in examples],
+            batch_first=True,
+            padding_value=0,
+        ).float()
 
         # (B × T)
         input_mask = input_ids.ne(self.tokenizer.pad_token_id)
@@ -123,15 +139,6 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
         labels = input_ids.roll(-1)
         labels[:, -1] = self.tokenizer.pad_token_id
         labels[labels.eq(self.tokenizer.pad_token_id)] = -100
-
-        weights = torch.nn.utils.rnn.pad_sequence(
-            [torch.tensor(example["weights"]) for example in examples],
-            batch_first=True,
-            padding_value=0,
-        ).float()
-        weights = torch.cat(
-            [torch.zeros_like(prefix).to(weights.dtype), weights], dim=1
-        )
 
         return {
             "input_ids": input_ids,
@@ -193,8 +200,8 @@ class TruncatedLossTrainer(Trainer):
         )
 
         if loss < 0.05:
-            ic(self.tokenizer.decode(input_ids[0]))
-            ic(self.tokenizer.decode(input_ids[0][mask_keep_loss[0]]))
+            ic(self.processing_class.decode(input_ids[0]))
+            ic(self.processing_class.decode(input_ids[0][mask_keep_loss[0]]))
             breakpoint()
 
         return (loss, outputs) if return_outputs else loss
@@ -205,25 +212,6 @@ class TruncatedLossTrainer(Trainer):
         if "weights" not in batch_samples[0]:
             return sum((batch["labels"].ne(-100)).sum() for batch in batch_samples)
         return sum((batch["weights"].ne(0)).sum() for batch in batch_samples)
-
-
-def tokenize(
-    batch: dict, *, cfg: Config, tokenizer: AutoTokenizer, context_length: int = 1024
-) -> dict:
-    """Tokenize and pack sequences to minimize waste."""
-    # Tokenize all texts
-    all_tokens = []
-    for text in batch["text"]:
-        tokens = tokenizer(text, add_special_tokens=False)["input_ids"]
-        all_tokens.extend(tokens)
-        all_tokens.append(tokenizer.pad_token_id)  # Add separator between texts
-
-    # Pack into fixed-length sequences
-    input_batch = []
-    for i in range(0, len(all_tokens) - context_length + 1, context_length):
-        input_batch.append(all_tokens[i : i + context_length])
-
-    return {"input_ids": input_batch}
 
 
 def do_train(cfg: Config) -> None:
@@ -238,20 +226,6 @@ def do_train(cfg: Config) -> None:
     ds = hf_datasets.load_dataset(cfg.dataset_name)
     ds.set_format("torch")
     ic(ds)
-
-    def collate(examples):
-        obj = {
-            "input_ids": torch.nn.utils.rnn.pad_sequence(
-                [x["input_ids"] for x in examples],
-                batch_first=True,
-                padding_value=tokenizer.pad_token_id,
-            ),
-            "weights": torch.nn.utils.rnn.pad_sequence(
-                [x["weights"] for x in examples], batch_first=True, padding_value=0
-            ),
-        }
-        obj["labels"] = obj["input_ids"].clone()
-        return obj
 
     collator = ReconstructionTaskCollator(tokenizer)
 
