@@ -139,6 +139,7 @@ class TruncatedLossTrainer(Trainer):
         # decoder-only model
         if "input_ids" in inputs:
             input_ids = inputs["input_ids"]
+            ic(input_ids.shape)
             labels = inputs["labels"]
             attention_mask = inputs["attention_mask"]
             mask_keep_loss = inputs["mask_keep_loss"]
