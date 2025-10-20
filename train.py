@@ -51,7 +51,8 @@ class Config:
 
     # dataset_name: str = "mideind/mim"
     # dataset_name: str = "mideind/mim-gold-21.05"
-    dataset_name: str = "vesteinn/babylm"
+    # dataset_name: str = "vesteinn/babylm"
+    dataset_name: str = "mideind/lestur.soup.igc"
     # dataset_name: str = "mideind/is_prototyping_corpus"
     # model_name: str = "AI-Sweden-Models/gpt-sw3-126m"
     model_name: str = "AI-Sweden-Models/gpt-sw3-356m"
@@ -69,83 +70,62 @@ class Config:
     save_steps: int = 1000
     learning_rate: float = 5e-5
 
-    # eval_steps=cfg.eval_steps,
-    # logging_steps=cfg.logging_steps,
-    # gradient_accumulation_steps=cfg.accumulate_steps,
-    # num_train_epochs=1,
     # weight_decay=0.01,
-    # warmup_steps=cfg.warmup_steps,
     # lr_scheduler_type="cosine",
-    # save_steps=cfg.save_steps,
-    # max_steps=cfg.max_steps,
-    # bf16=True,
-    # push_to_hub=False,
-    # label_names=["labels", "weights"],
 
 
-class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
-    """Collator for the reconstruction task."""
+# class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
+#     """Collator for the reconstruction task."""
 
-    def __init__(self, tokenizer):
-        super().__init__(tokenizer, mlm=False)
+#     def __init__(self, tokenizer):
+#         super().__init__(tokenizer, mlm=False)
 
-    def torch_call(self, examples: list[dict]) -> dict:
-        # the super method does not handle our dict keys
+#     def torch_call(self, examples: list[dict]) -> dict:
+#         # the super method does not handle our dict keys
 
-        assert "weights" in examples[0]
+#         assert "weights" in examples[0]
 
-        # Handle dict or lists with proper padding and conversion to tensor.
+#         # Handle dict or lists with proper padding and conversion to tensor.
 
-        if self.seed and self.generator is None:
-            # If we have a seed, we need to create a generator object. Subsequent calls to this function will use the same generator.
-            # If no seed supplied, we will use the global RNG
-            self.create_rng()
+#         if self.seed and self.generator is None:
+#             # If we have a seed, we need to create a generator object. Subsequent calls to this function will use the same generator.
+#             # If no seed supplied, we will use the global RNG
+#             self.create_rng()
 
-        bsz = len(examples)
+#         bsz = len(examples)
 
-        # input_ids = torch.nn.utils.rnn.pad_sequence(
-        #     # [torch.tensor(example["input_ids"]) for example in examples],
-        #     [example["input_ids"] for example in examples],
-        #     batch_first=True,
-        #     padding_value=self.tokenizer.pad_token_id,
-        # )
+#         input_ids = torch.nn.utils.rnn.pad_sequence(
+#             # [torch.tensor(example["input_ids"]) for example in examples],
+#             [example["input_ids"] for example in examples],
+#             batch_first=True,
+#             padding_value=self.tokenizer.pad_token_id,
+#         )
 
-        # weights = torch.nn.utils.rnn.pad_sequence(
-        #     # [torch.tensor(example["weights"]) for example in examples],
-        #     [example["weights"] for example in examples],
-        #     batch_first=True,
-        #     padding_value=0,
-        # ).float()
+#         weights = torch.nn.utils.rnn.pad_sequence(
+#             # [torch.tensor(example["weights"]) for example in examples],
+#             [example["weights"] for example in examples],
+#             batch_first=True,
+#             padding_value=0,
+#         ).float()
 
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            [ex["input_ids"][ex["weights"].gt(0)] for ex in examples],
-            batch_first=True,
-            padding_value=self.tokenizer.pad_token_id,
-        )
-        weights = torch.nn.utils.rnn.pad_sequence(
-            [ex["weights"][ex["weights"].gt(0)] for ex in examples],
-            batch_first=True,
-            padding_value=0,
-        ).float()
+#         # (B × T)
+#         input_mask = input_ids.ne(self.tokenizer.pad_token_id)
+#         # (B × T × 1) · (B × 1 × T) → (B × T × T)
+#         input_mask = input_mask.unsqueeze(-1) @ input_mask.unsqueeze(1)
+#         # (B × T × T)
+#         attention_mask = input_mask.tril()
 
-        # (B × T)
-        input_mask = input_ids.ne(self.tokenizer.pad_token_id)
-        # (B × T × 1) · (B × 1 × T) → (B × T × T)
-        input_mask = input_mask.unsqueeze(-1) @ input_mask.unsqueeze(1)
-        # (B × T × T)
-        attention_mask = input_mask.tril()
+#         # shift the input so we predict the next token
+#         labels = input_ids.roll(-1)
+#         labels[:, -1] = self.tokenizer.pad_token_id
+#         labels[labels.eq(self.tokenizer.pad_token_id)] = -100
 
-        # shift the input so we predict the next token
-        labels = input_ids.roll(-1)
-        labels[:, -1] = self.tokenizer.pad_token_id
-        labels[labels.eq(self.tokenizer.pad_token_id)] = -100
-
-        return {
-            "input_ids": input_ids,
-            "labels": labels,
-            "weights": weights,
-            "attention_mask": attention_mask,
-        }
+#         return {
+#             "input_ids": input_ids,
+#             "labels": labels,
+#             "weights": weights,
+#             "attention_mask": attention_mask,
+#         }
 
 
 class TruncatedLossTrainer(Trainer):
@@ -154,40 +134,16 @@ class TruncatedLossTrainer(Trainer):
     def compute_loss(
         self, model, inputs, return_outputs=False, num_items_in_batch=None
     ):
-        pad_token_id = self.processing_class.pad_token_id
-
         input_ids = inputs["input_ids"]
-        weights = inputs.get("weights", None)
+        weights = inputs["weights"]
         labels = inputs["labels"]
+        attention_mask = inputs["attention_mask"]
+        mask_keep_loss = inputs["mask_keep_loss"]
 
-        bsz = input_ids.shape[0]
-        seq_len = input_ids.shape[1]
-
-        if weights is None:
-            weights = input_ids.ne(pad_token_id).long()
-
-        # (B × T)
-        input_mask = input_ids.ne(pad_token_id)
-        # (B × T × 1) ⨀ (B × 1 × T) → (B × T × T)
-        input_mask = input_mask[:, :, None] * input_mask[:, None, :]
-        # (B × T × T)
-        attention_mask = input_mask.tril()
-
-        outputs = model(
-            input_ids=input_ids, attention_mask=attention_mask, labels=labels
-        )
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
         logits = outputs["logits"]
 
-        mask_keep_loss = weights.gt(0).logical_and(labels.gt(0))
-
-        # # ignore first k tokens of real targets
-        # loc_first_tgts = weights.argmax(-1).unsqueeze(-1)
-        # first_k_real_tgts = torch.arange(seq_len).tile(bsz, 1).to(weights.device)
-        # first_k_real_tgts = first_k_real_tgts.lt(loc_first_tgts + 16)
-        # mask_keep_loss = mask_keep_loss.logical_and(
-        #     first_k_real_tgts.logical_not()
-        # )
-
+        # filter out padding and loss-truncation
         flat_logits = logits[mask_keep_loss]
         flat_labels = labels[mask_keep_loss]
 
@@ -199,11 +155,6 @@ class TruncatedLossTrainer(Trainer):
             / NAT_LOG_OF_2
         )
 
-        if loss < 0.05:
-            ic(self.processing_class.decode(input_ids[0]))
-            ic(self.processing_class.decode(input_ids[0][mask_keep_loss[0]]))
-            breakpoint()
-
         return (loss, outputs) if return_outputs else loss
 
     def _get_num_items_in_batch(
@@ -212,6 +163,25 @@ class TruncatedLossTrainer(Trainer):
         if "weights" not in batch_samples[0]:
             return sum((batch["labels"].ne(-100)).sum() for batch in batch_samples)
         return sum((batch["weights"].ne(0)).sum() for batch in batch_samples)
+
+
+def tokenize(
+    batch: dict, *, cfg: Config, tokenizer: AutoTokenizer, context_length: int = 1024
+) -> dict:
+    """Tokenize and pack sequences to minimize waste."""
+    # Tokenize all texts
+    all_tokens = []
+    for text in batch["text"]:
+        tokens = tokenizer(text, add_special_tokens=False)["input_ids"]
+        all_tokens.extend(tokens)
+        all_tokens.append(tokenizer.pad_token_id)  # Add separator between texts
+
+    # Pack into fixed-length sequences
+    input_batch = []
+    for i in range(0, len(all_tokens) - context_length + 1, context_length):
+        input_batch.append(all_tokens[i : i + context_length])
+
+    return {"input_ids": input_batch}
 
 
 def do_train(cfg: Config) -> None:
@@ -225,9 +195,65 @@ def do_train(cfg: Config) -> None:
     logger.info(f"Loading dataset: {cfg.dataset_name}")
     ds = hf_datasets.load_dataset(cfg.dataset_name)
     ds.set_format("torch")
-    ic(ds)
 
-    collator = ReconstructionTaskCollator(tokenizer)
+    def collate(examples):
+        bsz = len(examples)
+
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            [ex["input_ids"] for ex in examples],
+            batch_first=True,
+            padding_value=self.tokenizer.pad_token_id,
+        )
+
+        weights = torch.nn.utils.rnn.pad_sequence(
+            [ex["weights"] for ex in examples],
+            batch_first=True,
+            padding_value=0,
+        ).float()
+
+        # input_ids = torch.nn.utils.rnn.pad_sequence(
+        #     [ex["input_ids"][ex["weights"].gt(0)] for ex in examples],
+        #     batch_first=True,
+        #     padding_value=self.tokenizer.pad_token_id,
+        # )
+        # weights = torch.nn.utils.rnn.pad_sequence(
+        #     [ex["weights"][ex["weights"].gt(0)] for ex in examples],
+        #     batch_first=True,
+        #     padding_value=0,
+        # ).float()
+
+        # (B × T)
+        input_mask = input_ids.ne(pad_token_id)
+        # (B × T × 1) ⨀ (B × 1 × T) → (B × T × T)
+        input_mask = input_mask[:, :, None] * input_mask[:, None, :]
+        # (B × T × T)
+        attention_mask = input_mask.tril()
+
+        # shift the input so we predict the next token
+        labels = input_ids.roll(-1)
+        labels[:, -1] = self.tokenizer.pad_token_id
+        labels[labels.eq(self.tokenizer.pad_token_id)] = -100
+
+        mask_keep_loss = weights.gt(0).logical_and(labels.gt(0))
+
+        # seq_len = input_ids.shape[1]
+        # # ignore first k tokens of real targets
+        # loc_first_tgts = weights.argmax(-1).unsqueeze(-1)
+        # first_k_real_tgts = torch.arange(seq_len).tile(bsz, 1).to(weights.device)
+        # first_k_real_tgts = first_k_real_tgts.lt(loc_first_tgts + 16)
+        # mask_keep_loss = mask_keep_loss.logical_and(
+        #     first_k_real_tgts.logical_not()
+        # )
+
+        return {
+            "input_ids": input_ids,
+            "labels": labels,
+            "weights": weights,
+            "attention_mask": attention_mask,
+            "mask_keep_loss": mask_keep_loss,
+        }
+
+    # collator = ReconstructionTaskCollator(tokenizer)
 
     # load model from huggingface
     logger.info(f"Loading model: {cfg.model_name}")
