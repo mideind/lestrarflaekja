@@ -296,7 +296,7 @@ def do_train(cfg: Config) -> None:
 
     # load model from huggingface
     logger.info(f"Loading model: {cfg.model_name}")
-    model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
+    # model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
 
     # Load the base model with specific device mapping
     model = AutoModelForCausalLM.from_pretrained(cfg.model_name, dtype=torch.bfloat16)
