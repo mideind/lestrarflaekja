@@ -135,7 +135,6 @@ class TruncatedLossTrainer(Trainer):
         self, model, inputs, return_outputs=False, num_items_in_batch=None
     ):
         input_ids = inputs["input_ids"]
-        weights = inputs["weights"]
         labels = inputs["labels"]
         attention_mask = inputs["attention_mask"]
         mask_keep_loss = inputs["mask_keep_loss"]
@@ -162,26 +161,7 @@ class TruncatedLossTrainer(Trainer):
     ) -> int | None:
         if "weights" not in batch_samples[0]:
             return sum((batch["labels"].ne(-100)).sum() for batch in batch_samples)
-        return sum((batch["weights"].ne(0)).sum() for batch in batch_samples)
-
-
-def tokenize(
-    batch: dict, *, cfg: Config, tokenizer: AutoTokenizer, context_length: int = 1024
-) -> dict:
-    """Tokenize and pack sequences to minimize waste."""
-    # Tokenize all texts
-    all_tokens = []
-    for text in batch["text"]:
-        tokens = tokenizer(text, add_special_tokens=False)["input_ids"]
-        all_tokens.extend(tokens)
-        all_tokens.append(tokenizer.pad_token_id)  # Add separator between texts
-
-    # Pack into fixed-length sequences
-    input_batch = []
-    for i in range(0, len(all_tokens) - context_length + 1, context_length):
-        input_batch.append(all_tokens[i : i + context_length])
-
-    return {"input_ids": input_batch}
+        return sum((batch["weights"].gt(0)).sum() for batch in batch_samples)
 
 
 def do_train(cfg: Config) -> None:
@@ -299,8 +279,8 @@ def do_train(cfg: Config) -> None:
         # num_train_epochs=1,
         gradient_accumulation_steps=cfg.accumulate_steps,
         per_device_train_batch_size=cfg.batch_size,
-        per_device_eval_batch_size=cfg.batch_size,
-        weight_decay=0.01,
+        per_device_eval_batch_size=cfg.batch_size * 2,
+        weight_decay=0.001,
         lr_scheduler_type="cosine",
         learning_rate=cfg.learning_rate,
         bf16=True,
