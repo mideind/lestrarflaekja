@@ -202,7 +202,7 @@ def do_train(cfg: Config) -> None:
         input_ids = torch.nn.utils.rnn.pad_sequence(
             [ex["input_ids"] for ex in examples],
             batch_first=True,
-            padding_value=self.tokenizer.pad_token_id,
+            padding_value=tokenizer.pad_token_id,
         )
 
         weights = torch.nn.utils.rnn.pad_sequence(
