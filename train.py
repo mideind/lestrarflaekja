@@ -189,8 +189,7 @@ class TruncatedLossTrainer(Trainer):
 def do_train(cfg: Config) -> None:
     """do_train function"""
 
-    # tokenizer = AutoTokenizer.from_pretrained("AI-Sweden-Models/gpt-sw3-356m")
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    tokenizer = AutoTokenizer.from_pretrained("AI-Sweden-Models/gpt-sw3-356m")
     tokenizer.pad_token_id = tokenizer.eos_token_id
     byte_tokenizer = AutoTokenizer.from_pretrained("google/byt5-small")
 
@@ -360,9 +359,9 @@ def do_train(cfg: Config) -> None:
 
     trainer = TruncatedLossTrainer(
         model=model,
-        tokenizer=tokenizer,
+        tokenizer=byte_tokenizer if "byt5" in cfg.model_name else tokenizer,
         args=train_cfg,
-        data_collator=collate_for_byt5 if "t5" in cfg.model_name else collate,
+        data_collator=collate_for_byt5 if "byt5" in cfg.model_name else collate,
         train_dataset=ds["train"],
         eval_dataset=ds["validation"].select(range(2000)),
     )
