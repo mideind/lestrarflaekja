@@ -88,6 +88,7 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
 
     def __init__(self, tokenizer):
         super().__init__(tokenizer, mlm=False)
+        self.prefix = torch.tensor(self.tokenizer.encode("orðasúpa og endurskrif:"))
 
     def torch_call(self, examples: list[dict]) -> dict:
         # the super method does not handle our dict keys
@@ -101,11 +102,15 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
             # If no seed supplied, we will use the global RNG
             self.create_rng()
 
+        bsz = len(examples)
+
         input_ids = torch.nn.utils.rnn.pad_sequence(
             [torch.tensor(example["input_ids"]) for example in examples],
             batch_first=True,
             padding_value=self.tokenizer.pad_token_id,
         )
+        prefix = self.prefix.tile(bsz, 1).to(input_ids.device)
+        input_ids = torch.cat([prefix, input_ids], dim=1)
 
         # (B × T)
         input_mask = input_ids.ne(self.tokenizer.pad_token_id)
@@ -119,23 +124,19 @@ class ReconstructionTaskCollator(DataCollatorForLanguageModeling):
         labels[:, -1] = self.tokenizer.pad_token_id
         labels[labels.eq(self.tokenizer.pad_token_id)] = -100
 
-        if "weights" in examples[0]:
-            weights = torch.nn.utils.rnn.pad_sequence(
-                [torch.tensor(example["weights"]) for example in examples],
-                batch_first=True,
-                padding_value=0,
-            ).float()
-
-            return {
-                "input_ids": input_ids,
-                "labels": labels,
-                "weights": weights,
-                "attention_mask": attention_mask,
-            }
+        weights = torch.nn.utils.rnn.pad_sequence(
+            [torch.tensor(example["weights"]) for example in examples],
+            batch_first=True,
+            padding_value=0,
+        ).float()
+        weights = torch.cat(
+            [torch.zeros_like(prefix).to(weights.dtype), weights], dim=1
+        )
 
         return {
             "input_ids": input_ids,
             "labels": labels,
+            "weights": weights,
             "attention_mask": attention_mask,
         }
 
@@ -228,6 +229,7 @@ def tokenize(
 def do_train(cfg: Config) -> None:
     """do_train function"""
 
+    # tokenizer = AutoTokenizer.from_pretrained("AI-Sweden-Models/gpt-sw3-356m")
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
     tokenizer.pad_token_id = tokenizer.eos_token_id
 
