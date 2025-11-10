@@ -1,33 +1,15 @@
-import torch
-
-import logging
-import functools
+# pylint: disable=unused-import,unused-argument,W0611,logging-fstring-interpolation,not-callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Callable
+import sys
 
-from loguru import logger
-import numpy
 import torch
-import datasets as hf_datasets
+from loguru import logger
 from omegaconf import OmegaConf
 from transformers import (
-    AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
-    DataCollatorForLanguageModeling,
 )
-from transformers import Trainer, TrainingArguments
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    DataCollatorForLanguageModeling,
-    Trainer,
-    TrainingArguments,
-    BitsAndBytesConfig,
-)
-from peft import PeftModel, LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from accelerate import Accelerator
-from icecream import ic
 
 example_texts = [
     """Heit og geislandi uppnumin í sæluvímu. Ást og aðdáun allra þeirra sem nutu hennar mettaði sál hennar dýrðlegri fullnægju, sem sökk niður í djúp vit­undarinnar. Fullnægju sem varð að óslökkvandi, já óseðjandi þrá,sem hvatti hana til dáða.Fékk hana til að skína og skína. Já, hvort hún skyldi skína í allri sinni dýrð!
@@ -64,7 +46,7 @@ class ScoredChunk:
 
 
 @dataclass
-class ExampleScorer:
+class SpanInfillingScorer:
     cfg: InferConfig
     model: AutoModelForSeq2SeqLM
     tokenizer: AutoTokenizer
@@ -76,63 +58,87 @@ class ExampleScorer:
         model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_id)
         return cls(cfg=cfg, model=model, tokenizer=byte_tokenizer)
 
-    def score_string(self, text: str):
+    def score_string(self, text: str) -> tuple[torch.Tensor, list[ScoredChunk]]:
+        """Score the input text string using span infilling.
+        We divide the text into infillable chunks, and score each chunk.
+        We aggregate the scores, keeping only scores when a byte was masked (and reconstructed).
+
+        Args:
+            text: input text string
+        """
+
         # we are assuming no overlap (stride=mask_length) for now
         # the mask sequence without hints is "<MASK>" (in upper case),
         # the mask sequence with length hint is f"<MASK_{length}>"
         logger.info(text)
         words = text.split()
-        byte_ids = torch.tensor(self.tokenizer(text).input_ids)
-        # (T) → (B × T)
-        byte_ids = byte_ids.unsqueeze(0)
-        unhinted_mask = "<MASK>"
 
-        mask_seq = torch.tensor(self.tokenizer("<MASK>").input_ids)
+        byte_ids_unshifted = torch.tensor(self.tokenizer(text).input_ids)  # type: ignore[operator]
+        assert len(byte_ids_unshifted.shape) == 1
+        # (T) → (B × T)
+        byte_ids_unshifted = byte_ids_unshifted.unsqueeze(0)
+
+        # ByT5/T5 implementation shifts the label sequence internally
+        # https://huggingface.co/docs/transformers/en/model_doc/byt5
+        labels_unshifted = byte_ids_unshifted.clone()
+
+        mask_str_wo_length_hint = "<MASK>"
+
+        mask_seq = torch.tensor(self.tokenizer("<MASK>").input_ids)  # type: ignore[operator]
         logger.debug(mask_seq.shape)
 
-        idxs = list(range(0, len(byte_ids), self.cfg.mask_length // 2))
+        idxs = list(range(0, len(byte_ids_unshifted), self.cfg.mask_length // 2))
         # add end point of last interval
-        if idxs[-1] < len(byte_ids) - 5:
-            idxs.append(len(byte_ids))
+        if idxs[-1] < len(byte_ids_unshifted) - 5:
+            idxs.append(len(byte_ids_unshifted))
 
-        intervals = list(zip(idxs[:-1], idxs[1:]))
+        chunk_intervals = list(zip(idxs[:-1], idxs[1:]))
 
-        accums = torch.zeros_like(byte_ids, dtype=torch.float)
-        denoms = torch.zeros_like(accums)
+        scores_byte_infilling = torch.zeros_like(byte_ids_unshifted, dtype=torch.float)
+        denoms = torch.zeros_like(scores_byte_infilling)
         scored_chunks = []
 
-        for chunk_idx, (mask_start, mask_end) in enumerate(intervals):
-            byte_ids_with_mask = torch.cat(
-                [byte_ids[:mask_start], mask_seq, byte_ids[mask_end:]]
-            )
-            logger.debug(byte_ids_with_mask.shape)
+        for _chunk_idx, (loc_span_start, loc_span_end) in enumerate(chunk_intervals):
+            # shape: (T)
+            prefix = byte_ids_unshifted[:loc_span_start]
+            suffix = byte_ids_unshifted[loc_span_end:]
+            # middle
+            target_ids = byte_ids_unshifted[loc_span_start:loc_span_end]
+
+            input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=0)
+
+            logger.debug(input_ids_w_masking.shape)
             # (T) → (B × T)
-            byte_ids_with_mask = byte_ids_with_mask.unsqueeze(0)
+            input_ids_w_masking = input_ids_w_masking.unsqueeze(0)
 
-            out = model(input_ids=byte_ids_with_mask, labels=byte_ids)
-            logger.debug(out.logits.shape)
-            target_seq = byte_ids_[mask_start:mask_end]
+            out = self.model(input_ids=input_ids_w_masking, labels=labels_unshifted)  # type: ignore[operator]
+            # out.logits shape: (B × T × V)
+            assert out.logits[:, 0].numel() == 1
+            # (B × T × V) → (T × V)
+            logits = out.logits.cpu().squeeze(0)
 
-            chunk_scores = out.logits.squeeze(0)[mask_start:mask_end].cpu()
-            chunk_scores = chunk_scores.gather(index=byte_ids, dim=2)
-            chunk = ScoredChunk(start=mask_start, end=mask_end, scores=chunk_scores)
+            span_logits = logits[loc_span_start:loc_span_end]
+            target_scores = span_logits.gather(
+                index=target_ids.unsqueeze(-1), dim=1
+            ).squeeze(-1)
 
+            foo = span_logits.gather(index=target_ids, dim=1)
+            logger.debug(f"foo shape: {foo.shape}")
+
+            scores_byte_infilling[loc_span_start:loc_span_end] += target_scores
+
+            # chunk_scores = chunk_scores.gather(index=byte_ids_unshifted, dim=2)
+            # store chunk info (for possible later analysis)
+            scored_chunk = ScoredChunk(
+                start=loc_span_start, end=loc_span_end, scores=target_scores
+            )
             scored_chunks.append(scored_chunk)
-            accums[mask_start:mask_end] += chunk.scores
-            denoms[mask_start:mask_end] += 1.0
 
-        # prevent division by zero
-        denoms[denoms.eq(0)] = 1
-
-        # TODO: we might want to discard scores near the edges of target span
-        final_score = accums / denoms
-
-        pass
-        # rich.print()
+        return scores_byte_infilling, scored_chunks
 
 
 def do_main(cfg: InferConfig):
-    scorer = ExampleScorer.from_config(cfg=cfg)
+    scorer = SpanInfillingScorer.from_config(cfg=cfg)
     result = scorer.score_string(example_texts[0])
 
 
@@ -142,8 +148,9 @@ def main() -> None:
     cli_cfg = OmegaConf.from_cli()
     cfg = OmegaConf.merge(cfg, cli_cfg)
     cfg = OmegaConf.to_container(cfg, resolve=True)
+
     try:
-        cfg = InferConfig(**cfg)
+        cfg = InferConfig(**cfg)  # type: ignore[arg-type]
     except TypeError as e:  # pylint: disable=broad-exception-raised
         logger.error(f"Error: {e}\n\nUsage: python scratch.py")
         sys.exit(1)
