@@ -229,13 +229,13 @@ class SpanInfillingScorer:
         for _chunk_idx, (loc_span_start, loc_span_end) in enumerate(chunk_intervals):
             # shape: (T)
             ic(_chunk_idx, loc_span_start, loc_span_end)
-            prefix = byte_ids_unshifted[:loc_span_start]
-            suffix = byte_ids_unshifted[loc_span_end:]
+            prefix = byte_ids_unshifted[:, :loc_span_start]
+            suffix = byte_ids_unshifted[:, loc_span_end:]
             # middle
-            target_ids = byte_ids_unshifted[loc_span_start:loc_span_end]
+            target_ids = byte_ids_unshifted[:, loc_span_start:loc_span_end]
 
             ic(prefix.shape, mask_seq.shape, suffix.shape)
-            breakpoint()
+            # breakpoint()
             input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=1)
 
             ic(input_ids_w_masking.shape)
