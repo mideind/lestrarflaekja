@@ -207,7 +207,10 @@ class SpanInfillingScorer:
 
         mask_str_wo_length_hint = "<MASK>"
 
-        mask_seq = torch.tensor(self.tokenizer(mask_str_wo_length_hint).input_ids)  # type: ignore[operator]
+        mask_seq = self.tokenizer(
+            mask_str_wo_length_hint, skip_special_tokens=False
+        ).input_ids  # type: ignore[operator]
+        mask_seq = torch.tensor(mask_seq)
         logger.debug(f"{mask_seq=}")
 
         idxs = list(range(0, len(byte_ids_unshifted), self.cfg.mask_length // 2))
