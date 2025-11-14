@@ -232,7 +232,7 @@ class SpanInfillingScorer:
             # middle
             target_ids = byte_ids_unshifted[loc_span_start:loc_span_end]
 
-            input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=0)
+            input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=1)
 
             logger.debug(input_ids_w_masking.shape)
             # (T) → (B × T)
