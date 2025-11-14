@@ -271,6 +271,7 @@ def do_main(cfg: InferConfig):
     )
     logger.info(scored_example)
     # test save/load
+    torch.serialization.add_safe_globals([ScoredExample])
     scored_example.save_to_file("scored_example.pt")
     loaded_example = ScoredExample.load_from_file("scored_example.pt")
     logger.info(f"Loaded example successfully: {loaded_example.text[:20]}...")
