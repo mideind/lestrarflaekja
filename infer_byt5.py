@@ -13,6 +13,7 @@ from transformers import (
 import rich
 import pickle
 from icecream import ic  # type: ignore[import]
+from accelerate import Accelerator
 
 
 example_texts = [
@@ -171,13 +172,15 @@ class SpanInfillingScorer:
     cfg: InferConfig
     model: AutoModelForSeq2SeqLM
     tokenizer: AutoTokenizer
+    accel: Accelerator
 
     @classmethod
-    def from_config(cls, cfg: InferConfig):
+    def from_config(cls, cfg: InferConfig, accel: Accelerator) -> "SpanInfillingScorer":
         byte_tokenizer = AutoTokenizer.from_pretrained("google/byt5-small")
         # TODO: device map
         model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_id)
-        return cls(cfg=cfg, model=model, tokenizer=byte_tokenizer)
+        model = accel.prepare(model)
+        return cls(cfg=cfg, model=model, tokenizer=byte_tokenizer, accel=accel)
 
     def score_string(self, text: str) -> SpanInfillingScorerResult:
         """Score the input text string using span infilling.
@@ -243,8 +246,10 @@ class SpanInfillingScorer:
             ic(input_ids_w_masking.shape, labels_unshifted.shape)
             breakpoint()
             out = self.model(input_ids=input_ids_w_masking, labels=labels_unshifted)  # type: ignore[operator]
+            ic(out.logits.device)
+            ic(out.logits.shape)
             # out.logits shape: (B × T × V)
-            assert out.logits[:, 0].numel() == 1
+            assert len(out.logits.shape) == 3
             # (B × T × V) → (T × V)
             logits = out.logits.cpu().squeeze(0)
 
@@ -283,7 +288,8 @@ class SpanInfillingScorer:
 
 
 def do_main(cfg: InferConfig):
-    scorer = SpanInfillingScorer.from_config(cfg=cfg)
+    accel = Accelerator(device_placement=True, mixed_precision="fp16")
+    scorer = SpanInfillingScorer.from_config(cfg=cfg, accel=accel)
 
     text = example_texts[0][:100]
     result = scorer.score_string(text=text)
