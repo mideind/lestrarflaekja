@@ -1,4 +1,5 @@
 # pylint: disable=unused-import,unused-argument,W0611,logging-fstring-interpolation,not-callable
+from typing import NamedTuple
 from dataclasses import dataclass
 import sys
 
@@ -9,7 +10,6 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
 )
-import numpy as np
 
 
 example_texts = [
@@ -64,7 +64,7 @@ class ScoredExample:
     byte_ids: torch.Tensor
     scored_chunks: list["ScoredChunk"]
     scores: torch.Tensor
-    tokens: list[str]
+    scored_tokens: list[ScoredToken]
 
     def save_to_file(self, filepath: str) -> None:
         """Save the scored example to a file.
@@ -92,7 +92,6 @@ class ScoredExample:
         byte_ids: torch.Tensor,
         byte_scores: torch.Tensor,
         scored_chunks: list["ScoredChunk"],
-        tokenizer: AutoTokenizer,
     ) -> "ScoredExample":
         """Create a ScoredExample from scored chunks.
 
@@ -100,7 +99,6 @@ class ScoredExample:
             text: the original text
             byte_scores: scores for each byte in the text
             scored_chunks: list of scored chunks
-            tokenizer: a tokenizer to convert text to byte_ids
         Returns:
             ScoredExample: the created scored example
         """
@@ -111,11 +109,12 @@ class ScoredExample:
         # word_byte_scores = []
         scored_words = []
 
-        # assert all(
-        #     chunk_curr.start < chunk_next.start
-        #     for chunk_curr, chunk_next in zip(scored_chunks, scored_chunks[1:])
-        # )
+        assert all(
+            chunk_curr.start < chunk_next.start
+            for chunk_curr, chunk_next in zip(scored_chunks, scored_chunks[1:])
+        )
 
+        # TODO: make sure we aren't supposed to shift by one to scores to ids
         byte_cursor = 0
         for word_index, (word_start, word_end, word_str) in enumerate(
             zip(word_offsets[:-1], word_offsets[1:], word_strings)
@@ -140,7 +139,22 @@ class ScoredExample:
             )
             scored_words.append(scored_word)
 
-        pass
+        return cls(
+            text=text,
+            byte_ids=byte_ids,
+            scored_chunks=scored_chunks,
+            scores=byte_scores,
+            scored_tokens=scored_words,
+        )
+
+
+class SpanInfillingScorerResult(NamedTuple):
+    """Return type for span infilling scorer."""
+
+    text: str
+    byte_ids: torch.Tensor
+    scores: torch.Tensor
+    scored_chunks: list[ScoredChunk]
 
 
 @dataclass
@@ -156,7 +170,7 @@ class SpanInfillingScorer:
         model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_id)
         return cls(cfg=cfg, model=model, tokenizer=byte_tokenizer)
 
-    def score_string(self, text: str) -> tuple[torch.Tensor, list[ScoredChunk]]:
+    def score_string(self, text: str) -> SpanInfillingScorerResult:
         """Score the input text string using span infilling.
         We divide the text into infillable chunks, and score each chunk.
         We aggregate the scores, keeping only scores when a byte was masked (and reconstructed).
@@ -171,6 +185,8 @@ class SpanInfillingScorer:
         # the mask sequence without hints is "<MASK>" (in upper case),
         # the mask sequence with length hint is f"<MASK_{length}>"
         logger.info(text)
+        byte_ids = torch.tensor(self.tokenizer(text).input_ids)  # type: ignore[operator]
+        assert isinstance(byte_ids, torch.Tensor)
 
         byte_ids_unshifted = torch.tensor(self.tokenizer(text).input_ids)  # type: ignore[operator]
         assert len(byte_ids_unshifted.shape) == 1
@@ -235,17 +251,23 @@ class SpanInfillingScorer:
             )
             scored_chunks.append(scored_chunk)
 
-        return scores_byte_infilling, scored_chunks
+        # return byte_ids, scores_byte_infilling, scored_chunks
+        return SpanInfillingScorerResult(
+            text=text,
+            byte_ids=byte_ids.squeeze(0),
+            scores=scores_byte_infilling.squeeze(0),
+            scored_chunks=scored_chunks,
+        )
 
 
 def do_main(cfg: InferConfig):
     scorer = SpanInfillingScorer.from_config(cfg=cfg)
-    scores, scored_chunks = scorer.score_string(example_texts[0])
+    result = scorer.score_string(example_texts[0])
     scored_example = ScoredExample.from_scored_chunks(
         text=example_texts[0],
-        byte_scores=scores,
-        scored_chunks=scored_chunks,
-        tokenizer=scorer.tokenizer,
+        byte_ids=result.byte_ids,
+        byte_scores=result.scores,
+        scored_chunks=result.scored_chunks,
     )
     logger.info(scored_example)
     # test save/load
