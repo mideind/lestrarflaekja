@@ -225,7 +225,6 @@ class SpanInfillingScorer:
             idxs.append(len(byte_ids_unshifted))
 
         chunk_intervals = list(zip(idxs[:-1], idxs[1:]))
-        ic(chunk_intervals)
 
         scores_byte_infilling = torch.zeros_like(byte_ids_unshifted, dtype=torch.float)
         # since our intervals overlap we need to track how often we scored each byte
@@ -265,18 +264,14 @@ class SpanInfillingScorer:
 
             # (T × V) → (T_mask × V)
             span_logits = logits[loc_span_start:loc_span_end]
-            ic(span_logits.shape, target_ids.shape)
-            breakpoint()
+            # ic(span_logits.shape, target_ids.shape)
             # (T_mask)
             target_scores = span_logits.gather(index=target_ids, dim=1).squeeze(-1)
 
-            # foo = span_logits.gather(index=target_ids, dim=1)
-            # ic(foo.shape)
-
+            ic(target_scores.shape, scores_byte_infilling.shape, scores_denom.shape)
             scores_byte_infilling[loc_span_start:loc_span_end] += target_scores
             scores_denom[loc_span_start:loc_span_end] += 1.0
 
-            # chunk_scores = chunk_scores.gather(index=byte_ids_unshifted, dim=2)
             # store chunk info (for possible later analysis)
             scored_chunk = ScoredChunk(
                 start=loc_span_start,
@@ -300,6 +295,8 @@ class SpanInfillingScorer:
 
 
 def do_main(cfg: InferConfig):
+    logger.info(cfg)
+
     accel = Accelerator(device_placement=True, mixed_precision="fp16")
     scorer = SpanInfillingScorer.from_config(cfg=cfg, accel=accel)
 
