@@ -209,9 +209,9 @@ class SpanInfillingScorer:
 
         mask_seq = self.tokenizer(mask_str_wo_length_hint).input_ids  # type: ignore[operator]
         mask_seq = torch.tensor(mask_seq[:-1])  # remove the EOS token
-        logger.debug(f"{mask_seq=}")
+        logger.debug(f"mask_seq: {mask_seq}")
 
-        idxs = list(range(0, len(byte_ids_unshifted), self.cfg.mask_length // 2))
+        idxs = list(range(0, byte_ids_unshifted.numel(), self.cfg.mask_length // 2))
         breakpoint()
         # add end point of last interval
         if idxs[-1] < len(byte_ids_unshifted) - 5:
@@ -222,6 +222,8 @@ class SpanInfillingScorer:
         breakpoint()
 
         scores_byte_infilling = torch.zeros_like(byte_ids_unshifted, dtype=torch.float)
+        # since our intervals overlap we need to track how often we scored each byte
+        scores_denom = torch.zeros_like(byte_ids_unshifted, dtype=torch.float)
         scored_chunks = []
 
         for _chunk_idx, (loc_span_start, loc_span_end) in enumerate(chunk_intervals):
@@ -252,6 +254,7 @@ class SpanInfillingScorer:
             logger.debug(f"foo shape: {foo.shape}")
 
             scores_byte_infilling[loc_span_start:loc_span_end] += target_scores
+            scores_denom[loc_span_start:loc_span_end] += 1.0
 
             # chunk_scores = chunk_scores.gather(index=byte_ids_unshifted, dim=2)
             # store chunk info (for possible later analysis)
@@ -263,10 +266,14 @@ class SpanInfillingScorer:
             )
             scored_chunks.append(scored_chunk)
 
-        # return byte_ids, scores_byte_infilling, scored_chunks
+        # make sure we don't divide by zero when calculating average
+        scores_denom = torch.clamp(scores_denom, min=1.0)
+        # calculate average
+        scores_byte_infilling = scores_byte_infilling / scores_denom
+
         return SpanInfillingScorerResult(
             text=text,
-            byte_ids=byte_ids.squeeze(0),
+            byte_ids=byte_ids_unshifted,
             scores=scores_byte_infilling.squeeze(0),
             scored_chunks=scored_chunks,
         )
