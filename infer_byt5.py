@@ -10,6 +10,7 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
 )
+import rich
 
 
 example_texts = [
@@ -264,7 +265,7 @@ def do_main(cfg: InferConfig):
     scorer = SpanInfillingScorer.from_config(cfg=cfg)
     result = scorer.score_string(example_texts[0])
     scored_example = ScoredExample.from_scored_chunks(
-        text=example_texts[0],
+        text=example_texts[0][:128],
         byte_ids=result.byte_ids,
         byte_scores=result.scores,
         scored_chunks=result.scored_chunks,
@@ -274,7 +275,9 @@ def do_main(cfg: InferConfig):
     torch.serialization.add_safe_globals([ScoredExample])
     scored_example.save_to_file("scored_example.pt")
     loaded_example = ScoredExample.load_from_file("scored_example.pt")
-    logger.info(f"Loaded example successfully: {loaded_example.text[:20]}...")
+    logger.info("Loaded example successfully")
+
+    rich.print(loaded_example)
 
 
 def main() -> None:
