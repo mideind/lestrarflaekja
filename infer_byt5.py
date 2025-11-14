@@ -12,6 +12,7 @@ from transformers import (
 )
 import rich
 import pickle
+from icecream import ic  # type: ignore[import]
 
 
 example_texts = [
@@ -232,10 +233,11 @@ class SpanInfillingScorer:
             # middle
             target_ids = byte_ids_unshifted[loc_span_start:loc_span_end]
 
-            logger.debug(_chunk_idx)
+            ic(_chunk_idx)
+            ic(prefix.shape, mask_seq.shape, suffix.shape)
             input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=1)
 
-            logger.debug(input_ids_w_masking.shape)
+            ic(input_ids_w_masking.shape)
             # (T) → (B × T)
             input_ids_w_masking = input_ids_w_masking.unsqueeze(0)
 
@@ -251,7 +253,7 @@ class SpanInfillingScorer:
             ).squeeze(-1)
 
             foo = span_logits.gather(index=target_ids, dim=1)
-            logger.debug(f"foo shape: {foo.shape}")
+            ic(foo.shape)
 
             scores_byte_infilling[loc_span_start:loc_span_end] += target_scores
             scores_denom[loc_span_start:loc_span_end] += 1.0
