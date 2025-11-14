@@ -57,7 +57,7 @@ class ScoredChunk:
 
 
 @dataclass
-class ScoredExample:
+class AnnotatedExample:
     """Text that has been tokenized and scored by a model. Each byte has a score.
     Scores are exportable to a JSON (for visualization) and pickle (for further processing).
     """
@@ -80,7 +80,7 @@ class ScoredExample:
             pickle.dump(self, f)
 
     @classmethod
-    def load_from_file(cls, filepath: str) -> "ScoredExample":
+    def load_from_file(cls, filepath: str) -> "AnnotatedExample":
         """Load a scored example from a file.
 
         Args:
@@ -100,7 +100,7 @@ class ScoredExample:
         byte_ids: torch.Tensor,
         byte_scores: torch.Tensor,
         scored_chunks: list["ScoredChunk"],
-    ) -> "ScoredExample":
+    ) -> "AnnotatedExample":
         """Create a ScoredExample from scored chunks.
 
         Args:
@@ -270,19 +270,24 @@ class SpanInfillingScorer:
 
 def do_main(cfg: InferConfig):
     scorer = SpanInfillingScorer.from_config(cfg=cfg)
-    result = scorer.score_string(example_texts[0])
-    scored_example = ScoredExample.from_scored_chunks(
-        text=example_texts[0][:128],
+
+    text = example_texts[0][:100]
+    result = scorer.score_string(text=text)
+    logger.info(result)
+
+    scored_example = AnnotatedExample.from_scored_chunks(
+        text=text,
         byte_ids=result.byte_ids,
         byte_scores=result.scores,
         scored_chunks=result.scored_chunks,
     )
     logger.info(scored_example)
+
     # test save/load
-    torch.serialization.add_safe_globals([ScoredExample])
+    torch.serialization.add_safe_globals([AnnotatedExample])
     scored_example.save_to_file("scored_example.pt")
-    loaded_example = ScoredExample.load_from_file("scored_example.pt")
-    logger.info("Loaded example successfully")
+    loaded_example = AnnotatedExample.load_from_file("scored_example.pt")
+    logger.info(f"Loaded example successfully: {loaded_example}")
 
     rich.print(loaded_example)
 
