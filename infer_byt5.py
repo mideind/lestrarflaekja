@@ -211,7 +211,7 @@ class SpanInfillingScorer:
         mask_seq = self.tokenizer(mask_str_wo_length_hint).input_ids  # type: ignore[operator]
         mask_seq = torch.tensor(mask_seq[:-1])  # remove the EOS token
         mask_seq = mask_seq.unsqueeze(0)  # remove the EOS token
-        logger.debug(f"mask_seq: {mask_seq}")
+        ic(mask_seq)
 
         idxs = list(range(0, byte_ids_unshifted.numel(), self.cfg.mask_length // 2))
         # add end point of last interval
@@ -219,7 +219,7 @@ class SpanInfillingScorer:
             idxs.append(len(byte_ids_unshifted))
 
         chunk_intervals = list(zip(idxs[:-1], idxs[1:]))
-        logger.debug(f"{chunk_intervals=}")
+        ic(chunk_intervals)
 
         scores_byte_infilling = torch.zeros_like(byte_ids_unshifted, dtype=torch.float)
         # since our intervals overlap we need to track how often we scored each byte
@@ -228,12 +228,12 @@ class SpanInfillingScorer:
 
         for _chunk_idx, (loc_span_start, loc_span_end) in enumerate(chunk_intervals):
             # shape: (T)
+            ic(_chunk_idx, loc_span_start, loc_span_end)
             prefix = byte_ids_unshifted[:loc_span_start]
             suffix = byte_ids_unshifted[loc_span_end:]
             # middle
             target_ids = byte_ids_unshifted[loc_span_start:loc_span_end]
 
-            ic(_chunk_idx)
             ic(prefix.shape, mask_seq.shape, suffix.shape)
             input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=1)
 
