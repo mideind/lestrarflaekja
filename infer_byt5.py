@@ -263,6 +263,8 @@ class SpanInfillingScorer:
             # (T_mask × V)
             span_logits = logits[loc_span_start:loc_span_end]
             # (T_mask)
+            ic(span_logits.shape, target_ids.shape)
+            breakpoint()
             target_scores = span_logits.gather(index=target_ids, dim=1).squeeze(-1)
 
             # foo = span_logits.gather(index=target_ids, dim=1)
