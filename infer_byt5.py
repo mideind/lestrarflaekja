@@ -263,7 +263,7 @@ class SpanInfillingScorer:
 
             # (T × V) → (T_mask × V)
             span_logits = logits[loc_span_start:loc_span_end]
-            # ic(span_logits.shape, target_ids.shape)
+            ic(span_logits.shape, target_ids.shape)
             # (T_mask × V), (T_mask × 1) → (T_mask)
             target_scores = span_logits.gather(index=target_ids, dim=1).squeeze(-1)
 
