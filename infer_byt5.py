@@ -208,8 +208,7 @@ class SpanInfillingScorer:
         mask_str_wo_length_hint = "<MASK>"
 
         mask_seq = torch.tensor(self.tokenizer(mask_str_wo_length_hint).input_ids)  # type: ignore[operator]
-        logger.debug(mask_seq.shape)
-        logger.debug(mask_seq)
+        logger.debug(f"{mask_seq=}")
 
         idxs = list(range(0, len(byte_ids_unshifted), self.cfg.mask_length // 2))
         # add end point of last interval
@@ -217,7 +216,7 @@ class SpanInfillingScorer:
             idxs.append(len(byte_ids_unshifted))
 
         chunk_intervals = list(zip(idxs[:-1], idxs[1:]))
-        logger.debug(f"chunk_intervals: {chunk_intervals}")
+        logger.debug(f"{chunk_intervals=}")
 
         scores_byte_infilling = torch.zeros_like(byte_ids_unshifted, dtype=torch.float)
         scored_chunks = []
