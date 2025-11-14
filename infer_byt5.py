@@ -240,18 +240,17 @@ class SpanInfillingScorer:
             input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=0)
 
             # ic(input_ids_w_masking.shape, labels_unshifted.shape)
-            input_ids_w_masking = input_ids_w_masking.to(self.accel.device)
-            labels_unshifted = labels_unshifted.to(self.accel.device)
-
-            # (T) → (B × T)  with B=1
-            input_ids_w_masking = input_ids_w_masking.unsqueeze(0)
-            labels_unshifted = labels_unshifted.unsqueeze(0)
+            input_ids = input_ids_w_masking.to(self.accel.device)
+            labels = labels_unshifted.to(self.accel.device)
+            # (T) → (B × T)
+            input_ids = input_ids.unsqueeze(0)
+            labels = labels.unsqueeze(0)
 
             # out.logits: (B × T × V)
-            out = self.model(input_ids=input_ids_w_masking, labels=labels_unshifted)  # type: ignore[operator]
-            assert len(out.logits.shape) == 3
+            logits = self.model(input_ids=input_ids, labels=labels).logits  # type: ignore[operator]
+            assert len(logits.shape) == 3
             # (B × T × V) → (T × V)
-            logits = out.logits.cpu()
+            logits = logits.cpu()
             logits = logits.squeeze(0)
 
             # ic(out.logits.shape, out.logits.device)
@@ -279,6 +278,7 @@ class SpanInfillingScorer:
                 byte_ids=target_ids,
             )
             scored_chunks.append(scored_chunk)
+            logger.debug("Scored chunk: {}", scored_chunk)
 
         # make sure we don't divide by zero when calculating average
         scores_denom = torch.clamp(scores_denom, min=1.0)
