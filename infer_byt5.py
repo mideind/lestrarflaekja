@@ -251,8 +251,8 @@ class SpanInfillingScorer:
             out = self.model(input_ids=input_ids_w_masking, labels=labels_unshifted)  # type: ignore[operator]
             assert len(out.logits.shape) == 3
             # (B × T × V) → (T × V)
-            logits = out.logits.squeeze(0)
             logits = out.logits.cpu()
+            logits = logits.squeeze(0)
 
             # ic(out.logits.shape, out.logits.device)
 
