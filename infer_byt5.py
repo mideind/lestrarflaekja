@@ -194,9 +194,8 @@ class SpanInfillingScorer:
         # the mask sequence without hints is "<MASK>" (in upper case),
         # the mask sequence with length hint is f"<MASK_{length}>"
         logger.info(text)
-        byte_ids = torch.tensor(self.tokenizer(text).input_ids)  # type: ignore[operator]
-        assert isinstance(byte_ids, torch.Tensor)
 
+        # shape: (T)
         byte_ids_unshifted = torch.tensor(self.tokenizer(text).input_ids)  # type: ignore[operator]
         assert len(byte_ids_unshifted.shape) == 1
         # (T) → (B × T)
@@ -208,9 +207,13 @@ class SpanInfillingScorer:
 
         mask_str_wo_length_hint = "<MASK>"
 
+        # shape: (T)
         mask_seq = self.tokenizer(mask_str_wo_length_hint).input_ids  # type: ignore[operator]
-        mask_seq = torch.tensor(mask_seq[:-1])  # remove the EOS token
-        mask_seq = mask_seq.unsqueeze(0)  # remove the EOS token
+        mask_seq = torch.tensor(mask_seq)
+        # remove EOS token
+        mask_seq = mask_seq[:-1]
+        # (T) → (1 × T)
+        mask_seq = mask_seq.unsqueeze(0)
         ic(mask_seq)
 
         idxs = list(range(0, byte_ids_unshifted.numel(), self.cfg.mask_length // 2))
@@ -234,14 +237,11 @@ class SpanInfillingScorer:
             # middle
             target_ids = byte_ids_unshifted[:, loc_span_start:loc_span_end]
 
-            ic(prefix.shape, mask_seq.shape, suffix.shape)
             # breakpoint()
             input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=1)
 
-            ic(input_ids_w_masking.shape)
-            # (T) → (B × T)
-            input_ids_w_masking = input_ids_w_masking.unsqueeze(0)
-
+            ic(input_ids_w_masking.shape, labels_unshifted.shape)
+            breakpoint()
             out = self.model(input_ids=input_ids_w_masking, labels=labels_unshifted)  # type: ignore[operator]
             # out.logits shape: (B × T × V)
             assert out.logits[:, 0].numel() == 1
