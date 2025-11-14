@@ -11,6 +11,7 @@ from transformers import (
     AutoTokenizer,
 )
 import rich
+import pickle
 
 
 example_texts = [
@@ -73,7 +74,10 @@ class ScoredExample:
         Args:
             filepath: path to the output file
         """
-        torch.save(self, filepath)
+        # torch.save(self, filepath)
+        # use pickle ourselves to avoid issues with torch.save
+        with open(filepath, "wb") as f:
+            pickle.dump(self, f)
 
     @classmethod
     def load_from_file(cls, filepath: str) -> "ScoredExample":
@@ -84,7 +88,10 @@ class ScoredExample:
         Returns:
             ScoredExample: the loaded scored example
         """
-        return torch.load(filepath)
+        # return torch.load(filepath)
+        with open(filepath, "rb") as f:
+            obj = pickle.load(f)
+        return obj
 
     @classmethod
     def from_scored_chunks(
