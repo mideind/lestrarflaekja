@@ -235,6 +235,7 @@ class SpanInfillingScorer:
             target_ids = byte_ids_unshifted[loc_span_start:loc_span_end]
 
             ic(prefix.shape, mask_seq.shape, suffix.shape)
+            breakpoint()
             input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=1)
 
             ic(input_ids_w_masking.shape)
