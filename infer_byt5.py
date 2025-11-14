@@ -176,6 +176,7 @@ class SpanInfillingScorer:
 
     @classmethod
     def from_config(cls, cfg: InferConfig, accel: Accelerator) -> "SpanInfillingScorer":
+        logger.info(cfg)
         byte_tokenizer = AutoTokenizer.from_pretrained("google/byt5-small")
         # TODO: device map
         model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_id)
@@ -213,7 +214,6 @@ class SpanInfillingScorer:
         mask_seq = torch.tensor(mask_seq)
         # remove EOS token
         mask_seq = mask_seq[:-1]
-        ic(mask_seq)
 
         idxs = list(range(0, byte_ids_unshifted.numel(), self.cfg.mask_length // 2))
         # add end point of last interval
@@ -228,7 +228,6 @@ class SpanInfillingScorer:
         scored_chunks = []
 
         for _chunk_idx, (loc_span_start, loc_span_end) in enumerate(chunk_intervals):
-            ic(_chunk_idx, loc_span_start, loc_span_end)
             # prefix: (T1)
             prefix = byte_ids_unshifted[:loc_span_start]
             # suffix: (T2)
@@ -239,7 +238,6 @@ class SpanInfillingScorer:
             # (T1) + (T_mask) + (T2) → (T)
             input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=0)
 
-            # ic(input_ids_w_masking.shape, labels_unshifted.shape)
             input_ids = input_ids_w_masking.to(self.accel.device)
             labels = labels_unshifted.to(self.accel.device)
             # (T) → (B × T)
@@ -253,8 +251,6 @@ class SpanInfillingScorer:
             logits = logits.cpu()
             logits = logits.squeeze(0)
 
-            # ic(out.logits.shape, out.logits.device)
-
             # (T_mask) → (T_mask × 1)  ; required for gather
             target_ids = target_ids.unsqueeze(-1)
 
@@ -262,11 +258,9 @@ class SpanInfillingScorer:
 
             # (T × V) → (T_mask × V)
             span_logits = logits[loc_span_start:loc_span_end]
-            ic(span_logits.shape, target_ids.shape)
             # (T_mask × V), (T_mask × 1) → (T_mask)
             target_scores = span_logits.gather(index=target_ids, dim=1).squeeze(-1)
 
-            ic(target_scores.shape, scores_byte_infilling.shape, scores_denom.shape)
             scores_byte_infilling[loc_span_start:loc_span_end] += target_scores
             scores_denom[loc_span_start:loc_span_end] += 1.0
 
@@ -278,30 +272,29 @@ class SpanInfillingScorer:
                 byte_ids=target_ids,
             )
             scored_chunks.append(scored_chunk)
-            logger.debug("Scored chunk: {}", scored_chunk)
+            # logger.debug("Scored chunk: {}", scored_chunk)
 
         # make sure we don't divide by zero when calculating average
         scores_denom = torch.clamp(scores_denom, min=1.0)
         # calculate average
         scores_byte_infilling = scores_byte_infilling / scores_denom
 
-        return SpanInfillingScorerResult(
+        result = SpanInfillingScorerResult(
             text=text,
             byte_ids=byte_ids_unshifted,
             scores=scores_byte_infilling.squeeze(0),
             scored_chunks=scored_chunks,
         )
+        logger.debug(result)
+        return result
 
 
 def do_main(cfg: InferConfig):
-    logger.info(cfg)
-
     accel = Accelerator(device_placement=True, mixed_precision="fp16")
     scorer = SpanInfillingScorer.from_config(cfg=cfg, accel=accel)
 
     text = example_texts[0][:100]
     result = scorer.score_string(text=text)
-    logger.info(result)
 
     scored_example = AnnotatedExample.from_scored_chunks(
         text=text,
