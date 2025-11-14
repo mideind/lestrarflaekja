@@ -233,11 +233,12 @@ class SpanInfillingScorer:
         scored_chunks = []
 
         for _chunk_idx, (loc_span_start, loc_span_end) in enumerate(chunk_intervals):
-            # shape: (T)
             ic(_chunk_idx, loc_span_start, loc_span_end)
+            # prefix: (B × T1)
             prefix = byte_ids_unshifted[:, :loc_span_start]
+            # suffix: (B × T2)
             suffix = byte_ids_unshifted[:, loc_span_end:]
-            # middle
+            # middle: (B × T_mask)
             target_ids = byte_ids_unshifted[:, loc_span_start:loc_span_end]
 
             # breakpoint()
@@ -246,21 +247,26 @@ class SpanInfillingScorer:
             # ic(input_ids_w_masking.shape, labels_unshifted.shape)
             input_ids_w_masking = input_ids_w_masking.to(self.accel.device)
             labels_unshifted = labels_unshifted.to(self.accel.device)
+
+            # out.logits: (B × T × V)
             out = self.model(input_ids=input_ids_w_masking, labels=labels_unshifted)  # type: ignore[operator]
-            ic(out.logits.device)
-            ic(out.logits.shape)
-            # out.logits shape: (B × T × V)
             assert len(out.logits.shape) == 3
+
+            ic(out.logits.shape, out.logits.device)
+
             # (B × T × V) → (T × V)
             logits = out.logits.cpu().squeeze(0)
+            # (B × T × V) → (T × V)
+            target_ids = target_ids.squeeze(0)
 
+            # get the logits for the target span
+            # (T_mask × V)
             span_logits = logits[loc_span_start:loc_span_end]
-            target_scores = span_logits.gather(
-                index=target_ids.unsqueeze(-1), dim=1
-            ).squeeze(-1)
+            # (T_mask)
+            target_scores = span_logits.gather(index=target_ids, dim=1).squeeze(-1)
 
-            foo = span_logits.gather(index=target_ids, dim=1)
-            ic(foo.shape)
+            # foo = span_logits.gather(index=target_ids, dim=1)
+            # ic(foo.shape)
 
             scores_byte_infilling[loc_span_start:loc_span_end] += target_scores
             scores_denom[loc_span_start:loc_span_end] += 1.0
