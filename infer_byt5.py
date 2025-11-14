@@ -217,7 +217,7 @@ class SpanInfillingScorer:
             idxs.append(len(byte_ids_unshifted))
 
         chunk_intervals = list(zip(idxs[:-1], idxs[1:]))
-        logger.debug("chunk_intervals:", chunk_intervals)
+        logger.debug(f"chunk_intervals: {chunk_intervals}")
 
         scores_byte_infilling = torch.zeros_like(byte_ids_unshifted, dtype=torch.float)
         scored_chunks = []
