@@ -243,8 +243,9 @@ class SpanInfillingScorer:
             # breakpoint()
             input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=1)
 
-            ic(input_ids_w_masking.shape, labels_unshifted.shape)
-            breakpoint()
+            # ic(input_ids_w_masking.shape, labels_unshifted.shape)
+            input_ids_w_masking = self.accel.prepare(input_ids_w_masking)
+            labels_unshifted = self.accel.prepare(labels_unshifted)
             out = self.model(input_ids=input_ids_w_masking, labels=labels_unshifted)  # type: ignore[operator]
             ic(out.logits.device)
             ic(out.logits.shape)
