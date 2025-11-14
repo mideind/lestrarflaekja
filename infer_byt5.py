@@ -201,8 +201,6 @@ class SpanInfillingScorer:
         # shape: (T)
         byte_ids_unshifted = torch.tensor(self.tokenizer(text).input_ids)  # type: ignore[operator]
         assert len(byte_ids_unshifted.shape) == 1
-        # (T) → (B × T)
-        byte_ids_unshifted = byte_ids_unshifted.unsqueeze(0)
 
         # ByT5/T5 implementation shifts the label sequence internally
         # https://huggingface.co/docs/transformers/en/model_doc/byt5
@@ -215,8 +213,6 @@ class SpanInfillingScorer:
         mask_seq = torch.tensor(mask_seq)
         # remove EOS token
         mask_seq = mask_seq[:-1]
-        # (T) → (1 × T)
-        mask_seq = mask_seq.unsqueeze(0)
         ic(mask_seq)
 
         idxs = list(range(0, byte_ids_unshifted.numel(), self.cfg.mask_length // 2))
@@ -233,39 +229,42 @@ class SpanInfillingScorer:
 
         for _chunk_idx, (loc_span_start, loc_span_end) in enumerate(chunk_intervals):
             ic(_chunk_idx, loc_span_start, loc_span_end)
-            # prefix: (B × T1)
+            # prefix: (T1)
             prefix = byte_ids_unshifted[:, :loc_span_start]
-            # suffix: (B × T2)
+            # suffix: (T2)
             suffix = byte_ids_unshifted[:, loc_span_end:]
-            # middle: (B × T_mask)
+            # middle: (T_mask)
             target_ids = byte_ids_unshifted[:, loc_span_start:loc_span_end]
 
-            # breakpoint()
-            input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=1)
+            # (T1) + (T_mask) + (T2) → (T)
+            input_ids_w_masking = torch.cat([prefix, mask_seq, suffix], dim=0)
 
             # ic(input_ids_w_masking.shape, labels_unshifted.shape)
             input_ids_w_masking = input_ids_w_masking.to(self.accel.device)
             labels_unshifted = labels_unshifted.to(self.accel.device)
 
+            # (T) → (B × T)  with B=1
+            input_ids_w_masking = input_ids_w_masking.unsqueeze(0)
+            labels_unshifted = labels_unshifted.unsqueeze(0)
+
             # out.logits: (B × T × V)
             out = self.model(input_ids=input_ids_w_masking, labels=labels_unshifted)  # type: ignore[operator]
             assert len(out.logits.shape) == 3
-
-            ic(out.logits.shape, out.logits.device)
-
             # (B × T × V) → (T × V)
-            logits = out.logits.cpu().squeeze(0)
-            # (B × T_mask) → (T_mask)
-            target_ids = target_ids.squeeze(0)
-            # (T_mask) → (T_mask × 1)
-            target_ids = target_ids.unsqueeze(-1)  # required for gather
+            logits = out.logits.squeeze(0)
+            logits = out.logits.cpu()
+
+            # ic(out.logits.shape, out.logits.device)
+
+            # (T_mask) → (T_mask × 1)  ; required for gather
+            target_ids = target_ids.unsqueeze(-1)
 
             # get the logits for the target span
 
             # (T × V) → (T_mask × V)
             span_logits = logits[loc_span_start:loc_span_end]
             # ic(span_logits.shape, target_ids.shape)
-            # (T_mask)
+            # (T_mask × V), (T_mask × 1) → (T_mask)
             target_scores = span_logits.gather(index=target_ids, dim=1).squeeze(-1)
 
             ic(target_scores.shape, scores_byte_infilling.shape, scores_denom.shape)
