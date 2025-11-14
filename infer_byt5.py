@@ -256,15 +256,18 @@ class SpanInfillingScorer:
 
             # (B × T × V) → (T × V)
             logits = out.logits.cpu().squeeze(0)
-            # (B × T × V) → (T × V)
+            # (B × T_mask) → (T_mask)
             target_ids = target_ids.squeeze(0)
+            # (T_mask) → (T_mask × 1)
+            target_ids = target_ids.unsqueeze(-1)  # required for gather
 
             # get the logits for the target span
-            # (T_mask × V)
+
+            # (T × V) → (T_mask × V)
             span_logits = logits[loc_span_start:loc_span_end]
-            # (T_mask)
             ic(span_logits.shape, target_ids.shape)
             breakpoint()
+            # (T_mask)
             target_scores = span_logits.gather(index=target_ids, dim=1).squeeze(-1)
 
             # foo = span_logits.gather(index=target_ids, dim=1)
